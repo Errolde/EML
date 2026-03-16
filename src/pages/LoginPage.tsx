@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useApp } from '../context';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
-import { getDefaultStats } from '../store';
 import { Eye, EyeOff, Shield } from 'lucide-react';
 import { supabase } from '../supabase';
 
@@ -34,7 +33,7 @@ export function LoginPage({ setPage }: Props) {
       .from('profiles')
       .select('*')
       .eq('username', username.trim())
-      .single();
+      .maybeSingle();
 
     if (!profile) {
       setErrors({ password: 'No profile found for this username' });
@@ -53,7 +52,15 @@ export function LoginPage({ setPage }: Props) {
       return;
     }
 
-    setCurrentUser(profile);
+    // Map snake_case to camelCase
+    const mappedProfile = {
+      ...profile,
+      teamId: profile.team_id,
+      createdAt: profile.created_at,
+      stats: profile.stats ?? { matches: 0, wins: 0, goals: 0, assists: 0, emlChampionships: 0 },
+    };
+
+    setCurrentUser(mappedProfile);
     showToast(`Welcome, ${profile.username}!`);
     setPage('home');
     setLoading(false);
@@ -62,11 +69,12 @@ export function LoginPage({ setPage }: Props) {
   async function handleRegister() {
     if (!validate()) return;
 
+    // Check username not taken
     const { data: existing } = await supabase
       .from('profiles')
       .select('id')
       .eq('username', username.trim())
-      .single();
+      .maybeSingle();
 
     if (existing) {
       setErrors({ username: 'Username already taken' });
@@ -75,6 +83,7 @@ export function LoginPage({ setPage }: Props) {
 
     setLoading(true);
 
+    // Create auth user
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: `${username.trim().toLowerCase()}@eml26.com`,
       password,
@@ -86,18 +95,33 @@ export function LoginPage({ setPage }: Props) {
       return;
     }
 
-    const newProfile = {
+    // Create profile row
+    const { error: profileError } = await supabase.from('profiles').insert({
+      id: authData.user.id,
+      username: username.trim(),
+      role: 'player',
+      stats: { matches: 0, wins: 0, goals: 0, assists: 0, emlChampionships: 0 },
+      created_at: Date.now(),
+      team_id: null,
+    });
+
+    if (profileError) {
+      setErrors({ password: 'Profile creation failed: ' + profileError.message });
+      setLoading(false);
+      return;
+    }
+
+    const mappedProfile = {
       id: authData.user.id,
       username: username.trim(),
       role: 'player' as const,
-      ...getDefaultStats(),
-      created_at: Date.now(),
+      teamId: null,
+      createdAt: Date.now(),
+      stats: { matches: 0, wins: 0, goals: 0, assists: 0, emlChampionships: 0 },
     };
 
-    await supabase.from('profiles').insert(newProfile);
-
-    setCurrentUser(newProfile as any);
-    showToast(`Welcome to EML, ${newProfile.username}!`);
+    setCurrentUser(mappedProfile as any);
+    showToast(`Welcome to EML, ${username.trim()}!`);
     setPage('home');
     setLoading(false);
   }
