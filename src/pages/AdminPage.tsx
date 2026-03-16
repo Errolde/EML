@@ -1,3 +1,4 @@
+import { supabase } from '../supabase';
 import { useState, useRef } from 'react';
 import { useApp } from '../context';
 import { generateId, getDefaultStats } from '../store';
@@ -127,24 +128,23 @@ function TeamsAdmin({ setPage }: { setPage: (p: string) => void }) {
     reader.readAsDataURL(file);
   }
 
-  function createTeam() {
-    if (!name.trim()) { showToast('Team name required', 'error'); return; }
-    if (data.teams.find(t => t.name.toLowerCase() === name.toLowerCase())) { showToast('Team name already taken', 'error'); return; }
-    const team: Team = { id: generateId(), name: name.trim(), description, logo, playerIds: [], emlChampionships: 0, createdAt: Date.now() };
-    update({ ...data, teams: [...data.teams, team] });
-    showToast(`Team "${name}" created!`);
-    setName(''); setDescription(''); setLogo(''); setCreating(false);
-  }
+  async function createTeam() {
+  if (!name.trim()) { showToast('Team name required', 'error'); return; }
+  if (data.teams.find(t => t.name.toLowerCase() === name.toLowerCase())) { showToast('Team name already taken', 'error'); return; }
+  const { error } = await supabase.from('teams').insert({
+    name: name.trim(), description, logo, player_ids: [], eml_championships: 0, created_at: Date.now()
+  });
+  if (error) { showToast('Failed to create team', 'error'); return; }
+  showToast(`Team "${name}" created!`);
+  setName(''); setDescription(''); setLogo(''); setCreating(false);
+}
 
-  function deleteTeam(teamId: string) {
-    if (!confirm('Delete this team? Players will be removed from it.')) return;
-    update({
-      ...data,
-      teams: data.teams.filter(t => t.id !== teamId),
-      users: data.users.map(u => u.teamId === teamId ? { ...u, teamId: undefined } : u),
-    });
-    showToast('Team deleted');
-  }
+async function deleteTeam(teamId: string) {
+  if (!confirm('Delete this team? Players will be removed from it.')) return;
+  await supabase.from('teams').delete().eq('id', teamId);
+  await supabase.from('profiles').update({ team_id: null }).eq('team_id', teamId);
+  showToast('Team deleted');
+}
 
   return (
     <div className="space-y-4">
@@ -389,31 +389,37 @@ function AssignAdmin({ setPage }: { setPage: (p: string) => void }) {
   const { data, update, showToast } = useApp();
   const players = data.users.filter(u => u.role === 'player');
 
-  function assignToTeam(userId: string, teamId: string) {
-    const updated = {
-      ...data,
-      users: data.users.map(u => u.id === userId ? { ...u, teamId: teamId || undefined } : u),
-      teams: data.teams.map(t => ({
-        ...t,
-        playerIds: t.id === teamId
-          ? (t.playerIds.includes(userId) ? t.playerIds : [...t.playerIds, userId])
-          : t.playerIds.filter(id => id !== userId),
-      })),
-    };
-    update(updated);
-    showToast(teamId ? 'Assigned to team!' : 'Removed from team');
+  async function assignToTeam(userId: string, teamId: string) {
+  await supabase.from('profiles').update({ team_id: teamId || null }).eq('id', userId);
+  if (teamId) {
+    const team = data.teams.find(t => t.id === teamId);
+    const newPlayerIds = [...(team?.player_ids ?? []).filter((id: string) => id !== userId), userId];
+    await supabase.from('teams').update({ player_ids: newPlayerIds }).eq('id', teamId);
   }
+  const oldTeam = data.teams.find(t => t.player_ids?.includes(userId));
+  if (oldTeam && oldTeam.id !== teamId) {
+    await supabase.from('teams').update({ player_ids: oldTeam.player_ids.filter((id: string) => id !== userId) }).eq('id', oldTeam.id);
+  }
+  showToast(teamId ? 'Assigned to team!' : 'Removed from team');
+}
 
-  function createPlayerAccount() {
-    const username = prompt('Enter player username:');
-    if (!username?.trim()) return;
-    if (data.users.find(u => u.username.toLowerCase() === username.toLowerCase())) { showToast('Username already taken', 'error'); return; }
-    const password = prompt('Enter password (min 6 chars):');
-    if (!password || password.length < 6) { showToast('Invalid password', 'error'); return; }
-    const newUser = { id: generateId(), username: username.trim(), password, role: 'player' as const, stats: getDefaultStats(), createdAt: Date.now() };
-    update({ ...data, users: [...data.users, newUser] });
-    showToast(`Player "${username}" created!`);
-  }
+async function createPlayerAccount() {
+  const username = prompt('Enter player username:');
+  if (!username?.trim()) return;
+  if (data.users.find(u => u.username.toLowerCase() === username.toLowerCase())) { showToast('Username already taken', 'error'); return; }
+  const password = prompt('Enter password (min 6 chars):');
+  if (!password || password.length < 6) { showToast('Invalid password', 'error'); return; }
+  const { data: authData, error } = await supabase.auth.admin.createUser({
+    email: `${username.trim().toLowerCase()}@eml26.com`,
+    password,
+    email_confirm: true,
+  });
+  if (error || !authData.user) { showToast('Failed to create player', 'error'); return; }
+  await supabase.from('profiles').insert({
+    id: authData.user.id, username: username.trim(), role: 'player', created_at: Date.now()
+  });
+  showToast(`Player "${username}" created!`);
+}
 
   const teamOptions = [{ value: '', label: 'No team' }, ...data.teams.map(t => ({ value: t.id, label: t.name }))];
 
@@ -504,11 +510,19 @@ function StatsAdmin({ setPage }: { setPage: (p: string) => void }) {
     setEditing(userId);
   }
 
-  function saveEdit(userId: string) {
-    update({ ...data, users: data.users.map(u => u.id === userId ? { ...u, stats: { matches: editVals.matches || 0, wins: editVals.wins || 0, goals: editVals.goals || 0, assists: editVals.assists || 0, emlChampionships: editVals.emlChampionships || 0 } } : u) });
-    showToast('Stats updated!');
-    setEditing(null);
-  }
+ async function saveEdit(userId: string) {
+  await supabase.from('profiles').update({
+    stats: {
+      matches: editVals.matches || 0,
+      wins: editVals.wins || 0,
+      goals: editVals.goals || 0,
+      assists: editVals.assists || 0,
+      emlChampionships: editVals.emlChampionships || 0,
+    }
+  }).eq('id', userId);
+  showToast('Stats updated!');
+  setEditing(null);
+}
 
   return (
     <div className="space-y-4">
@@ -657,35 +671,39 @@ function MatchdaysAdmin() {
     setMatches(p => p.map((m, idx) => idx === i ? { ...m, [field]: val } : m));
   }
 
-  function createMatchday() {
-    const num = Number(mdNumber);
-    if (!num || num < 1) { showToast('Invalid matchday number', 'error'); return; }
-    if (data.matchdays.find(md => md.number === num)) { showToast('Matchday number already exists', 'error'); return; }
-    const validMatches = matches.filter(m => m.homeTeamId && m.awayTeamId && m.homeTeamId !== m.awayTeamId && m.date);
-    if (validMatches.length === 0) { showToast('Add at least one valid match', 'error'); return; }
-    const md: Matchday = { id: generateId(), number: num, matches: validMatches as Match[], createdAt: Date.now() };
-    update({ ...data, matchdays: [...data.matchdays, md].sort((a, b) => a.number - b.number) });
-    showToast(`Matchday ${num} created!`);
-    setCreating(false); setMdNumber(''); setMatches([{ id: generateId(), homeTeamId: '', awayTeamId: '', date: '', played: false }]);
-  }
+async function createMatchday() {
+  const num = Number(mdNumber);
+  if (!num || num < 1) { showToast('Invalid matchday number', 'error'); return; }
+  if (data.matchdays.find(md => md.number === num)) { showToast('Matchday number already exists', 'error'); return; }
+  const validMatches = matches.filter(m => m.homeTeamId && m.awayTeamId && m.homeTeamId !== m.awayTeamId && m.date);
+  if (validMatches.length === 0) { showToast('Add at least one valid match', 'error'); return; }
+  const { error } = await supabase.from('matchdays').insert({
+    number: num, matches: validMatches, created_at: Date.now()
+  });
+  if (error) { showToast('Failed to create matchday', 'error'); return; }
+  showToast(`Matchday ${num} created!`);
+  setCreating(false); setMdNumber(''); setMatches([{ id: generateId(), homeTeamId: '', awayTeamId: '', date: '', played: false }]);
+}
 
-  function deleteMatchday(id: string) {
-    if (!confirm('Delete this matchday?')) return;
-    update({ ...data, matchdays: data.matchdays.filter(md => md.id !== id) });
-    showToast('Matchday deleted');
-  }
+async function deleteMatchday(id: string) {
+  if (!confirm('Delete this matchday?')) return;
+  await supabase.from('matchdays').delete().eq('id', id);
+  showToast('Matchday deleted');
+}
 
-  function saveScore() {
-    if (!editingScore) return;
-    const hs = Number(editingScore.home), as = Number(editingScore.away);
-    if (isNaN(hs) || isNaN(as) || hs < 0 || as < 0) { showToast('Invalid scores', 'error'); return; }
-    const updated = data.matchdays.map(md => md.id !== editingScore.mdId ? md : {
-      ...md, matches: md.matches.map(m => m.id !== editingScore.matchId ? m : { ...m, homeScore: hs, awayScore: as, played: true })
-    });
-    update({ ...data, matchdays: updated });
-    showToast('Score saved!');
-    setEditingScore(null);
-  }
+async function saveScore() {
+  if (!editingScore) return;
+  const hs = Number(editingScore.home), as = Number(editingScore.away);
+  if (isNaN(hs) || isNaN(as) || hs < 0 || as < 0) { showToast('Invalid scores', 'error'); return; }
+  const md = data.matchdays.find(md => md.id === editingScore.mdId);
+  if (!md) return;
+  const updatedMatches = md.matches.map(m =>
+    m.id !== editingScore.matchId ? m : { ...m, homeScore: hs, awayScore: as, played: true }
+  );
+  await supabase.from('matchdays').update({ matches: updatedMatches }).eq('id', editingScore.mdId);
+  showToast('Score saved!');
+  setEditingScore(null);
+}
 
   const sortedMds = [...data.matchdays].sort((a, b) => a.number - b.number);
 
@@ -1036,23 +1054,24 @@ function NewsAdmin() {
     reader.readAsDataURL(file);
   }
 
-  function publishArticle() {
-    if (!title.trim() || !content.trim()) { showToast('Title and content required', 'error'); return; }
-    const article: NewsArticle = {
-      id: generateId(), title: title.trim(), category: category as any, content: content.trim(),
-      authorId: currentUser!.id, ...(mediaUrl ? { media: { type: mediaType, url: mediaUrl } } : {}),
-      likes: [], comments: [], createdAt: Date.now(),
-    };
-    update({ ...data, news: [article, ...data.news] });
-    showToast('Article published!');
-    setCreating(false); setTitle(''); setContent(''); setMediaUrl('');
-  }
+  async function publishArticle() {
+  if (!title.trim() || !content.trim()) { showToast('Title and content required', 'error'); return; }
+  const { error } = await supabase.from('news_articles').insert({
+    title: title.trim(), category, content: content.trim(),
+    author_id: currentUser!.id,
+    media: mediaUrl ? { type: mediaType, url: mediaUrl } : null,
+    likes: [], comments: [], created_at: Date.now(),
+  });
+  if (error) { showToast('Failed to publish', 'error'); return; }
+  showToast('Article published!');
+  setCreating(false); setTitle(''); setContent(''); setMediaUrl('');
+}
 
-  function deleteArticle(id: string) {
-    if (!confirm('Delete this article?')) return;
-    update({ ...data, news: data.news.filter(a => a.id !== id) });
-    showToast('Article deleted');
-  }
+async function deleteArticle(id: string) {
+  if (!confirm('Delete this article?')) return;
+  await supabase.from('news_articles').delete().eq('id', id);
+  showToast('Article deleted');
+}
 
   return (
     <div className="space-y-4">
@@ -1134,33 +1153,42 @@ function AwardsAdmin({ setPage }: { setPage: (p: string) => void }) {
   const [deadline, setDeadline] = useState('');
   const [nomineeSelects, setNomineeSelects] = useState<Record<string, string>>({});
 
-  function createCategory() {
-    if (!catName.trim()) { showToast('Category name required', 'error'); return; }
-    const cat: AwardCategory = { id: generateId(), name: catName.trim(), deadline: deadline ? new Date(deadline).getTime() : undefined, nominees: [], closed: false, createdAt: Date.now() };
-    update({ ...data, awards: [...data.awards, cat] });
-    showToast('Award category created!');
-    setCatName(''); setDeadline(''); setCreating(false);
-  }
+  async function createCategory() {
+  if (!catName.trim()) { showToast('Category name required', 'error'); return; }
+  await supabase.from('awards').insert({
+    name: catName.trim(), deadline: deadline ? new Date(deadline).getTime() : null,
+    nominees: [], closed: false, created_at: Date.now()
+  });
+  showToast('Award category created!');
+  setCatName(''); setDeadline(''); setCreating(false);
+}
 
-  function addNominee(categoryId: string, userId: string) {
-    if (!userId) return;
-    update({ ...data, awards: data.awards.map(cat => cat.id !== categoryId ? cat : { ...cat, nominees: cat.nominees.find(n => n.userId === userId) ? cat.nominees : [...cat.nominees, { userId, votes: [] }] }) });
-    setNomineeSelects(p => ({ ...p, [categoryId]: '' }));
-  }
+async function addNominee(categoryId: string, userId: string) {
+  if (!userId) return;
+  const cat = data.awards.find(a => a.id === categoryId);
+  if (!cat || cat.nominees.find((n: any) => n.userId === userId)) return;
+  const newNominees = [...cat.nominees, { userId, votes: [] }];
+  await supabase.from('awards').update({ nominees: newNominees }).eq('id', categoryId);
+  setNomineeSelects(p => ({ ...p, [categoryId]: '' }));
+}
 
-  function removeNominee(categoryId: string, userId: string) {
-    update({ ...data, awards: data.awards.map(cat => cat.id !== categoryId ? cat : { ...cat, nominees: cat.nominees.filter(n => n.userId !== userId) }) });
-  }
+async function removeNominee(categoryId: string, userId: string) {
+  const cat = data.awards.find(a => a.id === categoryId);
+  if (!cat) return;
+  await supabase.from('awards').update({ nominees: cat.nominees.filter((n: any) => n.userId !== userId) }).eq('id', categoryId);
+}
 
-  function toggleClose(categoryId: string) {
-    update({ ...data, awards: data.awards.map(cat => cat.id !== categoryId ? cat : { ...cat, closed: !cat.closed }) });
-  }
+async function toggleClose(categoryId: string) {
+  const cat = data.awards.find(a => a.id === categoryId);
+  if (!cat) return;
+  await supabase.from('awards').update({ closed: !cat.closed }).eq('id', categoryId);
+}
 
-  function deleteCategory(id: string) {
-    if (!confirm('Delete this award category?')) return;
-    update({ ...data, awards: data.awards.filter(a => a.id !== id) });
-    showToast('Category deleted');
-  }
+async function deleteCategory(id: string) {
+  if (!confirm('Delete this award category?')) return;
+  await supabase.from('awards').delete().eq('id', id);
+  showToast('Category deleted');
+}
 
   const players = data.users.filter(u => u.role === 'player');
 

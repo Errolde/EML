@@ -4,11 +4,12 @@ import { getAvatarUrl, timeAgo } from '../utils/helpers';
 import { Newspaper, Heart, MessageCircle, Send, ChevronDown, ChevronUp, Reply, X } from 'lucide-react';
 import { generateId } from '../store';
 import { Comment, Reply as ReplyType } from '../types';
+import { supabase } from '../supabase';
 
 interface Props { setPage: (p: string) => void; }
 
 export function NewsPage({ setPage }: Props) {
-  const { data, update, currentUser, addNotification } = useApp();
+  const { data, currentUser, addNotification } = useApp();
   const [expandedArticle, setExpandedArticle] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
@@ -23,44 +24,41 @@ export function NewsPage({ setPage }: Props) {
     'Player Spotlight': 'bg-emerald-500/20 text-emerald-300',
   };
 
-  function toggleLikeArticle(articleId: string) {
+  async function toggleLikeArticle(articleId: string) {
     if (!currentUser) return;
-    const updated = data.news.map(a => {
-      if (a.id !== articleId) return a;
-      const liked = a.likes.includes(currentUser.id);
-      if (!liked && a.authorId !== currentUser.id) {
-        addNotification(a.authorId, 'like', `${currentUser.username} liked your article "${a.title}"`);
+    const article = data.news.find(a => a.id === articleId);
+    if (!article) return;
+    const liked = article.likes.includes(currentUser.id);
+    const newLikes = liked
+      ? article.likes.filter(id => id !== currentUser.id)
+      : [...article.likes, currentUser.id];
+    await supabase.from('news_articles').update({ likes: newLikes }).eq('id', articleId);
+    if (!liked && article.authorId !== currentUser.id) {
+      addNotification(article.authorId, 'like', `${currentUser.username} liked your article "${article.title}"`);
+    }
+  }
+
+  async function toggleLikeComment(articleId: string, commentId: string) {
+    if (!currentUser) return;
+    const article = data.news.find(a => a.id === articleId);
+    if (!article) return;
+    const newComments = article.comments.map(c => {
+      if (c.id !== commentId) return c;
+      const liked = c.likes.includes(currentUser.id);
+      if (!liked && c.authorId !== currentUser.id) {
+        addNotification(c.authorId, 'like', `${currentUser.username} liked your comment`);
       }
-      return { ...a, likes: liked ? a.likes.filter(id => id !== currentUser.id) : [...a.likes, currentUser.id] };
+      return { ...c, likes: liked ? c.likes.filter(id => id !== currentUser.id) : [...c.likes, currentUser.id] };
     });
-    update({ ...data, news: updated });
+    await supabase.from('news_articles').update({ comments: newComments }).eq('id', articleId);
   }
 
-  function toggleLikeComment(articleId: string, commentId: string) {
-    if (!currentUser) return;
-    const updated = data.news.map(a => {
-      if (a.id !== articleId) return a;
-      return {
-        ...a, comments: a.comments.map(c => {
-          if (c.id !== commentId) return c;
-          const liked = c.likes.includes(currentUser.id);
-          if (!liked && c.authorId !== currentUser.id) {
-            addNotification(c.authorId, 'like', `${currentUser.username} liked your comment`);
-          }
-          return { ...c, likes: liked ? c.likes.filter(id => id !== currentUser.id) : [...c.likes, currentUser.id] };
-        })
-      };
-    });
-    update({ ...data, news: updated });
-  }
-
-  function submitComment(articleId: string) {
+  async function submitComment(articleId: string) {
     const content = commentInputs[articleId]?.trim();
     if (!content || !currentUser) return;
     const article = data.news.find(a => a.id === articleId);
     if (!article) return;
 
-    // Check for @mentions
     const mentions = content.match(/@(\w+)/g) || [];
     for (const mention of mentions) {
       const mentionedUsername = mention.slice(1);
@@ -69,7 +67,6 @@ export function NewsPage({ setPage }: Props) {
         addNotification(mentionedUser.id, 'mention', `${currentUser.username} mentioned you in a comment`);
       }
     }
-
     if (article.authorId !== currentUser.id) {
       addNotification(article.authorId, 'comment', `${currentUser.username} commented on "${article.title}"`);
     }
@@ -82,16 +79,17 @@ export function NewsPage({ setPage }: Props) {
       likes: [],
       replies: [],
     };
-    const updated = data.news.map(a => a.id === articleId ? { ...a, comments: [...a.comments, newComment] } : a);
-    update({ ...data, news: updated });
+    const newComments = [...article.comments, newComment];
+    await supabase.from('news_articles').update({ comments: newComments }).eq('id', articleId);
     setCommentInputs(p => ({ ...p, [articleId]: '' }));
   }
 
-  function submitReply(articleId: string, commentId: string) {
+  async function submitReply(articleId: string, commentId: string) {
     const content = replyInputs[commentId]?.trim();
     if (!content || !currentUser) return;
-    const comment = data.news.find(a => a.id === articleId)?.comments.find(c => c.id === commentId);
-    if (!comment) return;
+    const article = data.news.find(a => a.id === articleId);
+    const comment = article?.comments.find(c => c.id === commentId);
+    if (!comment || !article) return;
 
     if (comment.authorId !== currentUser.id) {
       addNotification(comment.authorId, 'reply', `${currentUser.username} replied to your comment`);
@@ -104,11 +102,10 @@ export function NewsPage({ setPage }: Props) {
       createdAt: Date.now(),
       likes: [],
     };
-    const updated = data.news.map(a => a.id !== articleId ? a : {
-      ...a,
-      comments: a.comments.map(c => c.id !== commentId ? c : { ...c, replies: [...c.replies, newReply] })
-    });
-    update({ ...data, news: updated });
+    const newComments = article.comments.map(c =>
+      c.id !== commentId ? c : { ...c, replies: [...c.replies, newReply] }
+    );
+    await supabase.from('news_articles').update({ comments: newComments }).eq('id', articleId);
     setReplyInputs(p => ({ ...p, [commentId]: '' }));
     setReplyingTo(null);
   }
@@ -159,7 +156,6 @@ export function NewsPage({ setPage }: Props) {
 
           return (
             <div key={article.id} className="bg-[#0f1923] border border-white/10 rounded-2xl overflow-hidden">
-              {/* Header */}
               <div className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <img
@@ -181,7 +177,6 @@ export function NewsPage({ setPage }: Props) {
 
                 <h2 className="text-xl font-black text-white mb-3">{article.title}</h2>
 
-                {/* Content */}
                 <div className="text-white/70 text-sm leading-relaxed">
                   {isExpanded ? article.content : article.content.slice(0, 200) + (article.content.length > 200 ? '...' : '')}
                 </div>
@@ -194,7 +189,6 @@ export function NewsPage({ setPage }: Props) {
                   </button>
                 )}
 
-                {/* Media */}
                 {article.media && (
                   <div className="mt-4 rounded-xl overflow-hidden">
                     {article.media.type === 'image' ? (
@@ -205,7 +199,6 @@ export function NewsPage({ setPage }: Props) {
                   </div>
                 )}
 
-                {/* Actions */}
                 <div className="flex items-center gap-4 mt-4 pt-4 border-t border-white/5">
                   <button
                     onClick={() => toggleLikeArticle(article.id)}
@@ -224,7 +217,6 @@ export function NewsPage({ setPage }: Props) {
                 </div>
               </div>
 
-              {/* Comments */}
               {(isExpanded ? article.comments : visibleComments).length > 0 && (
                 <div className="border-t border-white/5 divide-y divide-white/5">
                   {(isExpanded ? article.comments : visibleComments).map(comment => {
@@ -262,7 +254,6 @@ export function NewsPage({ setPage }: Props) {
                               </button>
                             </div>
 
-                            {/* Replies */}
                             {comment.replies.length > 0 && (
                               <div className="mt-2 space-y-2 pl-2 border-l-2 border-white/10">
                                 {comment.replies.map(reply => {
@@ -281,7 +272,6 @@ export function NewsPage({ setPage }: Props) {
                               </div>
                             )}
 
-                            {/* Reply Input */}
                             {replyingTo === comment.id && (
                               <div className="flex gap-2 mt-2">
                                 <input
@@ -307,7 +297,6 @@ export function NewsPage({ setPage }: Props) {
                 </div>
               )}
 
-              {/* Comment Input */}
               <div className="px-6 py-3 border-t border-white/5">
                 <div className="flex gap-2 items-center">
                   <img src={currentUser?.avatar || getAvatarUrl(currentUser?.username || 'U')} alt="" className="w-7 h-7 rounded-full object-cover border border-white/10" />

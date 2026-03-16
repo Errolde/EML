@@ -2,11 +2,12 @@ import { useState, useRef } from 'react';
 import { useApp } from '../context';
 import { getAvatarUrl } from '../utils/helpers';
 import { ArrowLeft, Crown, Target, TrendingUp, Shield, Edit3, Save, X, Camera } from 'lucide-react';
+import { supabase } from '../supabase';
 
 interface Props { userId: string; setPage: (p: string) => void; }
 
 export function ProfilePage({ userId, setPage }: Props) {
-  const { data, update, currentUser, showToast } = useApp();
+  const { data, currentUser, showToast } = useApp();
   const user = data.users.find(u => u.id === userId);
   const isOwn = currentUser?.id === userId;
   const [editing, setEditing] = useState(false);
@@ -33,31 +34,38 @@ export function ProfilePage({ userId, setPage }: Props) {
     reader.readAsDataURL(file);
   }
 
-  function saveProfile() {
+  async function saveProfile() {
     if (!user) return;
     if (!username.trim()) { showToast('Username cannot be empty', 'error'); return; }
     if (username !== user.username && data.users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== userId)) {
       showToast('Username already taken', 'error'); return;
     }
     if (password && password.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
-    const updated = data.users.map(u => u.id === userId ? {
-      ...u,
+
+    // Update profile in Supabase
+    const { error } = await supabase.from('profiles').update({
       username: username.trim(),
-      ...(password ? { password } : {}),
       ...(avatar !== user.avatar ? { avatar } : {}),
-    } : u);
-    update({ ...data, users: updated });
+    }).eq('id', userId);
+
+    if (error) { showToast('Failed to update profile', 'error'); return; }
+
+    // Update password in Supabase Auth if changed
+    if (password) {
+      await supabase.auth.updateUser({ password });
+    }
+
     showToast('Profile updated!');
     setEditing(false);
     setPassword('');
   }
 
   const stats = [
-    { label: 'Matches', value: user.stats.matches, icon: Shield },
-    { label: 'Wins', value: user.stats.wins, icon: Crown },
-    { label: 'Goals', value: user.stats.goals, icon: Target },
-    { label: 'Assists', value: user.stats.assists, icon: TrendingUp },
-    { label: 'EML Titles', value: user.stats.emlChampionships, icon: Crown, gold: true },
+    { label: 'Matches', value: user.stats?.matches ?? 0, icon: Shield },
+    { label: 'Wins', value: user.stats?.wins ?? 0, icon: Crown },
+    { label: 'Goals', value: user.stats?.goals ?? 0, icon: Target },
+    { label: 'Assists', value: user.stats?.assists ?? 0, icon: TrendingUp },
+    { label: 'EML Titles', value: user.stats?.emlChampionships ?? 0, icon: Crown, gold: true },
   ];
 
   return (
@@ -66,9 +74,7 @@ export function ProfilePage({ userId, setPage }: Props) {
         <ArrowLeft size={16} /> Back
       </button>
 
-      {/* Profile Card */}
       <div className="bg-[#0f1923] border border-white/10 rounded-2xl overflow-hidden">
-        {/* Banner */}
         <div className="h-24 bg-gradient-to-r from-[#1e3a5f] to-[#0a1628]" />
         <div className="px-6 pb-6">
           <div className="flex items-end justify-between -mt-12 mb-4">
@@ -139,7 +145,7 @@ export function ProfilePage({ userId, setPage }: Props) {
                     <Shield size={12} /> {team.name}
                   </button>
                 )}
-                {user.stats.emlChampionships > 0 && (
+                {user.stats?.emlChampionships > 0 && (
                   <span className="flex items-center gap-1 text-[#e8b84b] text-sm font-bold">
                     <Crown size={12} /> {user.stats.emlChampionships}x Champion
                   </span>
@@ -151,7 +157,6 @@ export function ProfilePage({ userId, setPage }: Props) {
         </div>
       </div>
 
-      {/* Stats */}
       {user.role === 'player' && (
         <div className="bg-[#0f1923] border border-white/10 rounded-2xl p-6">
           <h2 className="font-bold text-white mb-4 text-sm uppercase tracking-wider text-white/50">Career Statistics</h2>
@@ -166,7 +171,6 @@ export function ProfilePage({ userId, setPage }: Props) {
         </div>
       )}
 
-      {/* Team */}
       {team && (
         <div className="bg-[#0f1923] border border-white/10 rounded-2xl p-6">
           <h2 className="font-bold text-white mb-4 text-sm uppercase tracking-wider text-white/50">Current Team</h2>

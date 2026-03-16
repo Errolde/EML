@@ -2,11 +2,12 @@ import { useState, useRef } from 'react';
 import { useApp } from '../context';
 import { getAvatarUrl } from '../utils/helpers';
 import { KeyRound, Camera, Save, Eye, EyeOff, User, ArrowLeft, Shield } from 'lucide-react';
+import { supabase } from '../supabase';
 
 interface Props { setPage: (p: string) => void; }
 
 export function SettingsPage({ setPage }: Props) {
-  const { data, update, currentUser, setCurrentUser, showToast } = useApp();
+  const { data, currentUser, setCurrentUser, showToast } = useApp();
   const rawUser = data.users.find(u => u.id === currentUser?.id);
 
   const [username, setUsername] = useState(rawUser?.username ?? '');
@@ -28,9 +29,7 @@ export function SettingsPage({ setPage }: Props) {
     );
   }
 
-  // Safe references after guard
   const uid = rawUser.id;
-  const storedPassword = rawUser.password;
   const currentUsername = rawUser.username;
   const currentAvatar = rawUser.avatar;
   const userRole = rawUser.role;
@@ -45,7 +44,7 @@ export function SettingsPage({ setPage }: Props) {
     reader.readAsDataURL(file);
   }
 
-  function saveProfile() {
+  async function saveProfile() {
     if (!username.trim()) { showToast('Username cannot be empty', 'error'); return; }
     if (username.trim() === currentUsername && avatar === currentAvatar) {
       showToast('No changes detected', 'error'); return;
@@ -55,34 +54,37 @@ export function SettingsPage({ setPage }: Props) {
       showToast('Username already taken', 'error'); return;
     }
     setSaving(true);
-    setTimeout(() => {
-      const updated = data.users.map(u =>
-        u.id === uid ? { ...u, username: username.trim(), avatar } : u
-      );
-      const found = updated.find(u => u.id === uid);
-      if (found) {
-        update({ ...data, users: updated });
-        setCurrentUser(found);
-      }
-      showToast('Profile updated!');
-      setSaving(false);
-    }, 400);
+    const { error } = await supabase.from('profiles').update({
+      username: username.trim(),
+      avatar,
+    }).eq('id', uid);
+
+    if (error) { showToast('Failed to update profile', 'error'); setSaving(false); return; }
+    setCurrentUser({ ...rawUser, username: username.trim(), avatar });
+    showToast('Profile updated!');
+    setSaving(false);
   }
 
-  function savePassword() {
+  async function savePassword() {
     if (!currentPw) { showToast('Enter your current password', 'error'); return; }
-    if (currentPw !== storedPassword) { showToast('Current password is incorrect', 'error'); return; }
     if (!newPw) { showToast('Enter a new password', 'error'); return; }
     if (newPw.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
     if (newPw !== confirmPw) { showToast('Passwords do not match', 'error'); return; }
     setSaving(true);
-    setTimeout(() => {
-      const updated = data.users.map(u => u.id === uid ? { ...u, password: newPw } : u);
-      update({ ...data, users: updated });
-      showToast('Password updated!');
-      setCurrentPw(''); setNewPw(''); setConfirmPw('');
-      setSaving(false);
-    }, 400);
+
+    // Verify current password by re-signing in
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: `${currentUsername.toLowerCase()}@eml26.com`,
+      password: currentPw,
+    });
+    if (signInError) { showToast('Current password is incorrect', 'error'); setSaving(false); return; }
+
+    const { error } = await supabase.auth.updateUser({ password: newPw });
+    if (error) { showToast('Failed to update password', 'error'); setSaving(false); return; }
+
+    showToast('Password updated!');
+    setCurrentPw(''); setNewPw(''); setConfirmPw('');
+    setSaving(false);
   }
 
   const inputStyle: React.CSSProperties = {
@@ -132,7 +134,6 @@ export function SettingsPage({ setPage }: Props) {
 
   return (
     <div className="max-w-lg mx-auto space-y-6 pb-10">
-      {/* Back */}
       <button
         onClick={() => setPage('home')}
         style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.4)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: 0 }}
@@ -147,7 +148,6 @@ export function SettingsPage({ setPage }: Props) {
         <p className="text-white/40 text-sm mt-1">Manage your profile and security</p>
       </div>
 
-      {/* Profile card */}
       <div style={card}>
         <div className="flex items-center gap-3 mb-5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -160,7 +160,6 @@ export function SettingsPage({ setPage }: Props) {
           </div>
         </div>
 
-        {/* Avatar */}
         <div className="flex items-center gap-5 mb-5">
           <div className="relative flex-shrink-0">
             <img
@@ -216,7 +215,6 @@ export function SettingsPage({ setPage }: Props) {
         </button>
       </div>
 
-      {/* Password card */}
       <div style={card}>
         <div className="flex items-center gap-3 mb-5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"

@@ -1,31 +1,27 @@
 import { useApp } from '../context';
 import { getAvatarUrl } from '../utils/helpers';
 import { Award, Trophy, Check, Lock } from 'lucide-react';
+import { supabase } from '../supabase';
 
 interface Props { setPage: (p: string) => void; }
 
 export function AwardsPage({ setPage }: Props) {
-  const { data, update, currentUser, showToast } = useApp();
+  const { data, currentUser, showToast } = useApp();
 
-  function vote(categoryId: string, nomineeUserId: string) {
+  async function vote(categoryId: string, nomineeUserId: string) {
     if (!currentUser) return;
     const category = data.awards.find(a => a.id === categoryId);
     if (!category || category.closed) { showToast('Voting is closed for this category', 'error'); return; }
     if (category.deadline && Date.now() > category.deadline) { showToast('Voting deadline has passed', 'error'); return; }
 
-    const updated = data.awards.map(cat => {
-      if (cat.id !== categoryId) return cat;
-      return {
-        ...cat,
-        nominees: cat.nominees.map(n => ({
-          ...n,
-          votes: n.userId === nomineeUserId
-            ? n.votes.includes(currentUser.id) ? n.votes.filter(id => id !== currentUser.id) : [...n.votes, currentUser.id]
-            : n.votes.filter(id => id !== currentUser.id),
-        }))
-      };
-    });
-    update({ ...data, awards: updated });
+    const newNominees = category.nominees.map(n => ({
+      ...n,
+      votes: n.userId === nomineeUserId
+        ? n.votes.includes(currentUser.id) ? n.votes.filter(id => id !== currentUser.id) : [...n.votes, currentUser.id]
+        : n.votes.filter(id => id !== currentUser.id),
+    }));
+
+    await supabase.from('awards').update({ nominees: newNominees }).eq('id', categoryId);
     showToast('Vote recorded!');
   }
 
@@ -127,9 +123,9 @@ export function AwardsPage({ setPage }: Props) {
                             </button>
                             {isWinner && <div className="text-[#e8b84b] text-xs font-semibold">🏆 Winner</div>}
                             <div className="flex items-center gap-3 text-xs text-white/40 mt-0.5">
-                              <span>{user.stats.goals}G</span>
-                              <span>{user.stats.assists}A</span>
-                              {user.stats.emlChampionships > 0 && <span>{user.stats.emlChampionships}× Champion</span>}
+                              <span>{user.stats?.goals ?? 0}G</span>
+                              <span>{user.stats?.assists ?? 0}A</span>
+                              {user.stats?.emlChampionships > 0 && <span>{user.stats.emlChampionships}× Champion</span>}
                             </div>
                           </div>
                           {isClosed ? (

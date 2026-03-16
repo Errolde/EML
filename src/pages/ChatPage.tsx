@@ -2,13 +2,13 @@ import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context';
 import { getAvatarUrl, timeAgo } from '../utils/helpers';
 import { Send, Hash, Globe, Lock, X, CornerUpLeft, ChevronLeft, Menu as MenuIcon } from 'lucide-react';
-import { generateId } from '../store';
 import { ChatMessage, MatchChat } from '../types';
+import { supabase } from '../supabase';
 
 interface Props { setPage: (p: string) => void; }
 
 export function ChatPage({ setPage }: Props) {
-  const { data, update, currentUser } = useApp();
+  const { data, currentUser } = useApp();
   const [activeTab, setActiveTab] = useState<string>('global');
   const [message, setMessage] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: string; authorId: string; content: string } | null>(null);
@@ -16,7 +16,6 @@ export function ChatPage({ setPage }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Build accessible match chats list
   const accessibleMatchChats: (MatchChat & { label: string; matchLabel: string })[] = [];
 
   if (currentUser) {
@@ -63,30 +62,26 @@ export function ChatPage({ setPage }: Props) {
     if (replyTo) inputRef.current?.focus();
   }, [replyTo]);
 
-  function sendMessage() {
+  async function sendMessage() {
     if (!message.trim() || !currentUser) return;
-    const msg: ChatMessage = {
-      id: generateId(),
-      authorId: currentUser.id,
-      content: message.trim(),
-      createdAt: Date.now(),
-      replyTo: replyTo ?? undefined,
-    };
 
     if (activeTab === 'global') {
-      const globalChat = [...data.globalChat, msg].slice(-50);
-      update({ ...data, globalChat });
+      await supabase.from('chat_messages').insert({
+        author_id: currentUser.id,
+        content: message.trim(),
+        reply_to: replyTo ?? null,
+        created_at: Date.now(),
+      });
     } else {
-      const matchChats = [...data.matchChats];
-      const idx = matchChats.findIndex(mc => mc.matchId === activeTab);
-      if (idx >= 0) {
-        matchChats[idx] = { ...matchChats[idx], messages: [...matchChats[idx].messages, msg] };
-      } else {
-        const md = data.matchdays.find(md => md.matches.some(m => m.id === activeTab));
-        matchChats.push({ matchId: activeTab, matchdayId: md?.id ?? '', messages: [msg], archived: false });
-      }
-      update({ ...data, matchChats });
+      await supabase.from('chat_messages').insert({
+        author_id: currentUser.id,
+        content: message.trim(),
+        match_id: activeTab,
+        reply_to: replyTo ?? null,
+        created_at: Date.now(),
+      });
     }
+
     setMessage('');
     setReplyTo(null);
   }
@@ -103,11 +98,9 @@ export function ChatPage({ setPage }: Props) {
 
   const isArchived = activeMatchChat?.archived;
 
-  // Sidebar channel list content — shared between desktop & mobile overlay
   function SidebarContent() {
     return (
       <>
-        {/* Server header */}
         <div style={{ padding: '14px 14px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(135deg,#e8b84b,#c99a2e)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 10, color: '#060a12', flexShrink: 0 }}>
@@ -120,7 +113,6 @@ export function ChatPage({ setPage }: Props) {
           </div>
         </div>
 
-        {/* Channels scroll */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
           <p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 8px', marginBottom: 4 }}>General</p>
 
@@ -154,7 +146,6 @@ export function ChatPage({ setPage }: Props) {
           )}
         </div>
 
-        {/* User footer */}
         {currentUser && (
           <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)', flexShrink: 0 }}>
             <button
@@ -177,8 +168,6 @@ export function ChatPage({ setPage }: Props) {
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
-
-      {/* Mobile sidebar overlay backdrop */}
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
@@ -186,7 +175,6 @@ export function ChatPage({ setPage }: Props) {
         />
       )}
 
-      {/* Sidebar — desktop always visible, mobile slide-in overlay */}
       <div style={{
         width: 220,
         background: '#070c16',
@@ -194,14 +182,12 @@ export function ChatPage({ setPage }: Props) {
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,
-        // Mobile: absolute overlay sliding in from left
         position: window.innerWidth < 768 ? 'absolute' : 'relative',
         top: 0, bottom: 0, left: 0,
         zIndex: window.innerWidth < 768 ? 30 : 'auto',
         transform: window.innerWidth < 768 ? (sidebarOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
         transition: 'transform 0.25s cubic-bezier(0.34,1.2,0.64,1)',
       } as React.CSSProperties}>
-        {/* Mobile close button */}
         <button
           onClick={() => setSidebarOpen(false)}
           style={{ display: window.innerWidth < 768 ? 'flex' : 'none', position: 'absolute', top: 10, right: 10, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 8, padding: 6, cursor: 'pointer', color: 'rgba(255,255,255,0.5)', zIndex: 1, alignItems: 'center', justifyContent: 'center' }}
@@ -211,12 +197,8 @@ export function ChatPage({ setPage }: Props) {
         <SidebarContent />
       </div>
 
-      {/* Main chat area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b1320', minWidth: 0, overflow: 'hidden' }}>
-
-        {/* Channel header */}
         <div style={{ height: 52, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0, gap: 10 }}>
-          {/* Mobile sidebar toggle */}
           <button
             onClick={() => setSidebarOpen(true)}
             className="md:hidden"
@@ -249,7 +231,6 @@ export function ChatPage({ setPage }: Props) {
           <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 11, flexShrink: 0 }}>{messages.length} msgs</span>
         </div>
 
-        {/* Messages */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 10px' }}>
           {messages.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', padding: 20 }}>
@@ -292,9 +273,7 @@ export function ChatPage({ setPage }: Props) {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input area */}
         <div style={{ padding: '0 10px 12px', flexShrink: 0 }}>
-          {/* Reply bar */}
           {replyTo && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px 12px 0 0', padding: '8px 12px', borderBottom: 'none' }}>
               <CornerUpLeft size={12} style={{ color: '#e8b84b', flexShrink: 0 }} />
@@ -360,7 +339,6 @@ export function ChatPage({ setPage }: Props) {
                   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
                 }}
               />
-              {/* Send button — always visible, disabled when empty */}
               <button
                 onClick={sendMessage}
                 disabled={!message.trim()}
@@ -392,7 +370,6 @@ export function ChatPage({ setPage }: Props) {
   );
 }
 
-// Extracted message row component
 function ChannelBtn({ icon, label, active, archived, onClick }: {
   icon: React.ReactNode; label: string; active: boolean; archived?: boolean; onClick: () => void;
 }) {
@@ -451,7 +428,6 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
         position: 'relative',
       }}
     >
-      {/* Avatar column */}
       <div style={{ width: 36, flexShrink: 0, display: 'flex', justifyContent: 'center', paddingTop: 2 }}>
         {showHeader ? (
           <button onClick={onAvatarClick} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
@@ -470,7 +446,6 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
         )}
       </div>
 
-      {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {showHeader && (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
@@ -489,7 +464,6 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
           </div>
         )}
 
-        {/* Reply preview */}
         {msg.replyTo && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, paddingLeft: 8, borderLeft: '2px solid rgba(255,255,255,0.18)' }}>
             <img src={getAvatarUrl(replyAuthor?.username ?? 'U', replyAuthor?.avatar)} alt="" style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0 }} />
@@ -503,7 +477,6 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
         <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word' }}>{msg.content}</p>
       </div>
 
-      {/* Reply button on hover */}
       {!isArchived && hovered && (
         <button
           onClick={onReply}
