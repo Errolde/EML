@@ -142,7 +142,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }));
           }
         })
-      .subscribe();
+      .subscribe((status) => {
+  console.log('Realtime status:', status);
+});
 
     return () => { supabase.removeChannel(channel); };
   }, [currentUser?.id]);
