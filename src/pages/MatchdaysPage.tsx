@@ -25,7 +25,7 @@ export function MatchdaysPage({ setPage }: Props) {
             🏆 Knockout Stage Active
           </div>
           <p className="text-white/50 text-sm">The playoff knockout bracket is underway!</p>
-          <button onClick={() => setPage('standings')} className="mt-3 text-sm text-purple-300 hover:text-purple-200 underline">
+          <button onClick={() => setPage('knockout')} className="mt-3 text-sm text-purple-300 hover:text-purple-200 underline">
             View Bracket →
           </button>
         </div>
