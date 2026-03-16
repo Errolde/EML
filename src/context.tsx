@@ -145,6 +145,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setData(prev => ({ ...prev, notifications: [mapNotification(payload.new), ...prev.notifications] }));
           }
         })
+
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'league_settings' },
+  payload => {
+    setData(prev => ({
+      ...prev,
+      seasonNumber: payload.new.season_number,
+      qualificationSpots: payload.new.qualification_spots,
+      seasonActive: payload.new.season_active,
+      groupStage: payload.new.group_stage,
+      knockout: payload.new.knockout,
+      leagueHistory: payload.new.league_history ?? [],
+    }));
+  })
       .subscribe((status) => {
         console.log('Realtime status:', status);
       });
