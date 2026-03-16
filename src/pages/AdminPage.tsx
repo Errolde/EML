@@ -386,39 +386,112 @@ function GroupsAdmin() {
 
 /* ==================== ASSIGN ADMIN ==================== */
 function AssignAdmin({ setPage }: { setPage: (p: string) => void }) {
-  const { data, update, showToast } = useApp();
+  const { data, showToast } = useApp();
   const players = data.users.filter(u => u.role === 'player');
 
   async function assignToTeam(userId: string, teamId: string) {
-  await supabase.from('profiles').update({ team_id: teamId || null }).eq('id', userId);
-  if (teamId) {
-    const team = data.teams.find(t => t.id === teamId);
-    const newPlayerIds = [...(team?.player_ids ?? []).filter((id: string) => id !== userId), userId];
-    await supabase.from('teams').update({ player_ids: newPlayerIds }).eq('id', teamId);
+    await supabase.from('profiles').update({ team_id: teamId || null }).eq('id', userId);
+    if (teamId) {
+      const team = data.teams.find(t => t.id === teamId);
+      const newPlayerIds = [...(team?.playerIds ?? []).filter((id: string) => id !== userId), userId];
+      await supabase.from('teams').update({ player_ids: newPlayerIds }).eq('id', teamId);
+    }
+    const oldTeam = data.teams.find(t => t.playerIds?.includes(userId));
+    if (oldTeam && oldTeam.id !== teamId) {
+      await supabase.from('teams').update({ player_ids: oldTeam.playerIds.filter((id: string) => id !== userId) }).eq('id', oldTeam.id);
+    }
+    showToast(teamId ? 'Assigned to team!' : 'Removed from team');
   }
-  const oldTeam = data.teams.find(t => t.player_ids?.includes(userId));
-  if (oldTeam && oldTeam.id !== teamId) {
-    await supabase.from('teams').update({ player_ids: oldTeam.player_ids.filter((id: string) => id !== userId) }).eq('id', oldTeam.id);
-  }
-  showToast(teamId ? 'Assigned to team!' : 'Removed from team');
-}
 
-async function createPlayerAccount() {
-  const username = prompt('Enter player username:');
-  if (!username?.trim()) return;
-  if (data.users.find(u => u.username.toLowerCase() === username.toLowerCase())) { showToast('Username already taken', 'error'); return; }
-  const password = prompt('Enter password (min 6 chars):');
-  if (!password || password.length < 6) { showToast('Invalid password', 'error'); return; }
-  const { data: authData, error } = await supabase.auth.admin.createUser({
-    email: `${username.trim().toLowerCase()}@eml26.com`,
-    password,
-    email_confirm: true,
-  });
-  if (error || !authData.user) { showToast('Failed to create player', 'error'); return; }
-  await supabase.from('profiles').insert({
-    id: authData.user.id, username: username.trim(), role: 'player', created_at: Date.now()
-  });
-  showToast(`Player "${username}" created!`);
+  const teamOptions = [{ value: '', label: 'No team' }, ...data.teams.map(t => ({ value: t.id, label: t.name }))];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold text-white text-base sm:text-lg">Assign Players ({players.length})</h2>
+      </div>
+
+      {/* Roster grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {data.teams.map(team => {
+          const teamPlayers = data.users.filter(u => u.teamId === team.id);
+          return (
+            <div key={team.id} className="p-4" style={card}>
+              <div className="flex items-center gap-2 mb-3">
+                {team.logo ? <img src={team.logo} alt="" className="w-7 h-7 rounded-lg object-cover" /> : <Shield size={16} style={{ color: '#e8b84b' }} />}
+                <span className="font-bold text-white text-sm truncate flex-1">{team.name}</span>
+                <span className="text-white/30 text-xs">{teamPlayers.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {teamPlayers.map(p => (
+                  <button key={p.id} onClick={() => setPage(`profile_${p.id}`)}
+                    className="text-xs px-2 py-1 rounded-lg transition-all"
+                    style={{ background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.6)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(232,184,75,0.15)'; (e.currentTarget as HTMLElement).style.color = '#e8b84b'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.6)'; }}>
+                    {p.username}
+                  </button>
+                ))}
+                {teamPlayers.length === 0 && <span className="text-white/20 text-xs">Empty</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Player assignment list */}
+      <div style={card} className="overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/[0.07]">
+          <p className="text-white/50 text-xs font-semibold uppercase tracking-wide">All Players</p>
+        </div>
+        <div className="divide-y divide-white/[0.05]">
+          {players.map((player, idx) => {
+            const isLast = idx >= players.length - 3;
+            return (
+              <div key={player.id} className="flex items-center gap-3 px-4 py-3">
+                <button onClick={() => setPage(`profile_${player.id}`)} className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <img src={player.avatar || getAvatarUrl(player.username)} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" style={{ border: '1.5px solid rgba(255,255,255,0.1)' }} />
+                  <div className="min-w-0 text-left">
+                    <p className="text-white text-sm font-medium truncate hover:text-[#e8b84b] transition-colors">{player.username}</p>
+                    <p className="text-white/35 text-xs truncate">{player.teamId ? data.teams.find(t => t.id === player.teamId)?.name || 'Unknown' : 'No team'}</p>
+                  </div>
+                </button>
+                {/* Native select instead of custom Select to avoid dropdown going off screen */}
+                <select
+                  value={player.teamId || ''}
+                  onChange={e => assignToTeam(player.id, e.target.value)}
+                  style={{
+                    background: 'rgba(255,255,255,0.07)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 10,
+                    color: 'white',
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    width: 150,
+                    flexShrink: 0,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {teamOptions.map(opt => (
+                    <option key={opt.value} value={opt.value} style={{ background: '#0d1520' }}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+          {players.length === 0 && (
+            <div className="px-4 py-10 text-center">
+              <Users size={28} className="mx-auto mb-2" style={{ color: 'rgba(255,255,255,0.1)' }} />
+              <p className="text-white/30 text-sm">No players yet. Players will appear here once they register.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
   const teamOptions = [{ value: '', label: 'No team' }, ...data.teams.map(t => ({ value: t.id, label: t.name }))];
