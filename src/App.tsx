@@ -36,6 +36,7 @@ function Inner() {
       case 'home': return <HomePage setPage={setPage} currentUser={currentUser} />;
       case 'login': return <LoginPage setPage={setPage} />;
       case 'standings': return currentUser ? <StandingsPage setPage={setPage} /> : <LoginPage setPage={setPage} />;
+      case 'knockout': return currentUser ? <StandingsPage setPage={setPage} initialTab="knockout" /> : <LoginPage setPage={setPage} />;
       case 'matchdays': return currentUser ? <MatchdaysPage setPage={setPage} /> : <LoginPage setPage={setPage} />;
       case 'players': return currentUser ? <PlayersPage setPage={setPage} /> : <LoginPage setPage={setPage} />;
       case 'teams': return currentUser ? <TeamsPage setPage={setPage} /> : <LoginPage setPage={setPage} />;

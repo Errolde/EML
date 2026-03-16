@@ -1,7 +1,7 @@
 import { supabase } from '../supabase';
 import { useState, useRef } from 'react';
 import { useApp } from '../context';
-import { generateId, getDefaultStats } from '../store';
+import { generateId, getDefaultStats, loadData } from '../store';
 import { getAvatarUrl, computeStandings, getAllMatchesFromMatchdays, getRoundName } from '../utils/helpers';
 import {
   LayoutDashboard, Shield, Users, Calendar, Newspaper, Award, MessageSquare,
@@ -848,81 +848,122 @@ function KnockoutAdmin({ setPage: _setPage }: { setPage: (p: string) => void }) 
   const allMatches = getAllMatchesFromMatchdays(data.matchdays);
   const standings = computeStandings(data.teams, allMatches);
 
-  function startKnockout() {
-    const spots = data.qualificationSpots;
-    const qualifiers = standings.slice(0, spots);
-    if (qualifiers.length < 2) { showToast('Need at least 2 teams to start knockout', 'error'); return; }
-    if (!confirm(`Start knockout with top ${qualifiers.length} teams?`)) return;
-    const seeded = [...qualifiers];
-    const numMatches = Math.pow(2, Math.floor(Math.log2(seeded.length)));
-    const teams = seeded.slice(0, numMatches);
-    const pairs: string[][] = [];
-    for (let i = 0; i < teams.length / 2; i++) pairs.push([teams[i].teamId, teams[teams.length - 1 - i].teamId]);
-    const round: KnockoutRound = {
-      id: generateId(), name: getRoundName(numMatches, 0),
-      matches: pairs.map(([h, a]) => ({ id: generateId(), homeTeamId: h, awayTeamId: a, played: false })),
-    };
-    update({ ...data, knockout: { active: true, rounds: [round], completed: false, championTeamId: undefined } });
-    showToast('Knockout started!');
-    data.users.filter(u => u.role === 'player').forEach(u => addNotification(u.id, 'knockout', 'The playoff knockout bracket has started!'));
-  }
+  async function startKnockout() {
+  const spots = data.qualificationSpots;
+  const qualifiers = standings.slice(0, spots);
+  if (qualifiers.length < 2) { showToast('Need at least 2 teams to start knockout', 'error'); return; }
+  if (!confirm(`Start knockout with top ${qualifiers.length} teams?`)) return;
+  const seeded = [...qualifiers];
+  const numMatches = Math.pow(2, Math.floor(Math.log2(seeded.length)));
+  const teams = seeded.slice(0, numMatches);
+  const pairs: string[][] = [];
+  for (let i = 0; i < teams.length / 2; i++) pairs.push([teams[i].teamId, teams[teams.length - 1 - i].teamId]);
+  const round: KnockoutRound = {
+    id: generateId(), name: getRoundName(numMatches, 0),
+    matches: pairs.map(([h, a]) => ({ id: generateId(), homeTeamId: h, awayTeamId: a, played: false })),
+  };
+  const newKnockout = { active: true, rounds: [round], completed: false, championTeamId: undefined };
+  await supabase.from('league_settings').upsert({
+    id: 1, season_number: data.seasonNumber, qualification_spots: data.qualificationSpots,
+    season_active: data.seasonActive, group_stage: data.groupStage,
+    knockout: newKnockout, league_history: data.leagueHistory,
+  });
+  showToast('Knockout started!');
+  data.users.filter(u => u.role === 'player').forEach(u => addNotification(u.id, 'knockout', 'The playoff knockout bracket has started!'));
+}
 
-  function cancelKnockout() {
-    if (!confirm('Cancel knockout and return to regular season?')) return;
-    update({ ...data, knockout: { active: false, rounds: [], completed: false } });
-    showToast('Knockout cancelled');
-  }
+async function cancelKnockout() {
+  if (!confirm('Cancel knockout and return to regular season?')) return;
+  const newKnockout = { active: false, rounds: [], completed: false };
+  await supabase.from('league_settings').upsert({
+    id: 1, season_number: data.seasonNumber, qualification_spots: data.qualificationSpots,
+    season_active: data.seasonActive, group_stage: data.groupStage,
+    knockout: newKnockout, league_history: data.leagueHistory,
+  });
+  showToast('Knockout cancelled');
+}
 
-  function resetBracket() {
-    if (!confirm('Reset entire bracket?')) return;
-    update({ ...data, knockout: { ...ko, rounds: ko.rounds.slice(0, 1).map(r => ({ ...r, matches: r.matches.map(m => ({ ...m, played: false, homeScore: undefined, awayScore: undefined, winnerId: undefined })) })), completed: false } });
-    showToast('Bracket reset');
-  }
+async function resetBracket() {
+  if (!confirm('Reset entire bracket?')) return;
+  const newKnockout = {
+    ...ko,
+    rounds: ko.rounds.slice(0, 1).map(r => ({
+      ...r, matches: r.matches.map(m => ({ ...m, played: false, homeScore: undefined, awayScore: undefined, winnerId: undefined }))
+    })),
+    completed: false,
+  };
+  await supabase.from('league_settings').upsert({
+    id: 1, season_number: data.seasonNumber, qualification_spots: data.qualificationSpots,
+    season_active: data.seasonActive, group_stage: data.groupStage,
+    knockout: newKnockout, league_history: data.leagueHistory,
+  });
+  showToast('Bracket reset');
+}
 
-  function saveKnockoutScore() {
-    if (!editingScore) return;
-    const hs = Number(editingScore.home), as = Number(editingScore.away);
-    if (isNaN(hs) || isNaN(as) || hs < 0 || as < 0) { showToast('Invalid scores', 'error'); return; }
-    if (hs === as) { showToast('No draws allowed in knockout!', 'error'); return; }
-    const roundIdx = ko.rounds.findIndex(r => r.id === editingScore.roundId);
-    if (roundIdx === -1) return;
-    if (!confirm(roundIdx > 0 ? 'Editing this score will reset all future rounds. Continue?' : 'Save score?')) return;
-    const winnerId = hs > as
-      ? ko.rounds[roundIdx].matches.find(m => m.id === editingScore.matchId)?.homeTeamId
-      : ko.rounds[roundIdx].matches.find(m => m.id === editingScore.matchId)?.awayTeamId;
-    const updatedRounds = ko.rounds.slice(0, roundIdx + 1).map((r, ri) =>
-      ri !== roundIdx ? r : { ...r, matches: r.matches.map(m => m.id !== editingScore.matchId ? m : { ...m, homeScore: hs, awayScore: as, played: true, winnerId }) }
-    );
-    const currentRound = updatedRounds[roundIdx];
-    const allPlayed = currentRound.matches.every(m => m.played);
-    if (allPlayed) {
-      const winners = currentRound.matches.map(m => m.winnerId!).filter(Boolean);
-      if (winners.length === 1) {
-        const championTeam = data.teams.find(t => t.id === winners[0]);
-        const updatedTeams = data.teams.map(t => t.id === winners[0] ? { ...t, emlChampionships: t.emlChampionships + 1 } : t);
-        const updatedUsers = data.users.map(u => u.teamId === winners[0] ? { ...u, stats: { ...u.stats, emlChampionships: u.stats.emlChampionships + 1 } } : u);
-        const history = [...data.leagueHistory, { id: generateId(), season: data.seasonNumber, championTeamId: winners[0], championTeamName: championTeam?.name || '', year: new Date().getFullYear() }];
-        update({ ...data, knockout: { ...ko, rounds: updatedRounds, active: false, completed: true, championTeamId: winners[0] }, teams: updatedTeams, users: updatedUsers, leagueHistory: history });
-        showToast(`🏆 ${championTeam?.name} are champions!`, 'success');
-        data.users.filter(u => u.role === 'player').forEach(u => addNotification(u.id, 'championship', `🏆 ${championTeam?.name} are the EML Champions!`));
-        return;
-      } else if (winners.length >= 2) {
-        const nextMatches: KnockoutMatch[] = [];
-        for (let i = 0; i < winners.length; i += 2) nextMatches.push({ id: generateId(), homeTeamId: winners[i], awayTeamId: winners[i + 1], played: false });
-        const nextRound: KnockoutRound = { id: generateId(), name: getRoundName(winners.length * 2, updatedRounds.length), matches: nextMatches };
-        update({ ...data, knockout: { ...ko, rounds: [...updatedRounds, nextRound] } });
-        showToast('Round complete! Next round generated.');
-        setEditingScore(null);
-        return;
+async function saveKnockoutScore() {
+  if (!editingScore) return;
+  const hs = Number(editingScore.home), as = Number(editingScore.away);
+  if (isNaN(hs) || isNaN(as) || hs < 0 || as < 0) { showToast('Invalid scores', 'error'); return; }
+  if (hs === as) { showToast('No draws allowed in knockout!', 'error'); return; }
+  const roundIdx = ko.rounds.findIndex(r => r.id === editingScore.roundId);
+  if (roundIdx === -1) return;
+  if (!confirm(roundIdx > 0 ? 'Editing this score will reset all future rounds. Continue?' : 'Save score?')) return;
+  const winnerId = hs > as
+    ? ko.rounds[roundIdx].matches.find(m => m.id === editingScore.matchId)?.homeTeamId
+    : ko.rounds[roundIdx].matches.find(m => m.id === editingScore.matchId)?.awayTeamId;
+  const updatedRounds = ko.rounds.slice(0, roundIdx + 1).map((r, ri) =>
+    ri !== roundIdx ? r : { ...r, matches: r.matches.map(m => m.id !== editingScore.matchId ? m : { ...m, homeScore: hs, awayScore: as, played: true, winnerId }) }
+  );
+  const currentRound = updatedRounds[roundIdx];
+  const allPlayed = currentRound.matches.every(m => m.played);
+
+  if (allPlayed) {
+    const winners = currentRound.matches.map(m => m.winnerId!).filter(Boolean);
+    if (winners.length === 1) {
+      const championTeam = data.teams.find(t => t.id === winners[0]);
+      const history = [...data.leagueHistory, { id: generateId(), season: data.seasonNumber, championTeamId: winners[0], championTeamName: championTeam?.name || '', year: new Date().getFullYear() }];
+      // Update team championships
+      await supabase.from('teams').update({ eml_championships: (championTeam?.emlChampionships ?? 0) + 1 }).eq('id', winners[0]);
+      // Update player stats
+      const champs = data.users.filter(u => u.teamId === winners[0]);
+      for (const u of champs) {
+        await supabase.from('profiles').update({ stats: { ...u.stats, emlChampionships: (u.stats?.emlChampionships ?? 0) + 1 } }).eq('id', u.id);
       }
+      await supabase.from('league_settings').upsert({
+        id: 1, season_number: data.seasonNumber, qualification_spots: data.qualificationSpots,
+        season_active: data.seasonActive, group_stage: data.groupStage,
+        knockout: { ...ko, rounds: updatedRounds, active: false, completed: true, championTeamId: winners[0] },
+        league_history: history,
+      });
+      showToast(`🏆 ${championTeam?.name} are champions!`, 'success');
+      data.users.filter(u => u.role === 'player').forEach(u => addNotification(u.id, 'championship', `🏆 ${championTeam?.name} are the EML Champions!`));
+      setEditingScore(null);
+      return;
+    } else if (winners.length >= 2) {
+      const nextMatches: KnockoutMatch[] = [];
+      for (let i = 0; i < winners.length; i += 2) nextMatches.push({ id: generateId(), homeTeamId: winners[i], awayTeamId: winners[i + 1], played: false });
+      const nextRound: KnockoutRound = { id: generateId(), name: getRoundName(winners.length * 2, updatedRounds.length), matches: nextMatches };
+      await supabase.from('league_settings').upsert({
+        id: 1, season_number: data.seasonNumber, qualification_spots: data.qualificationSpots,
+        season_active: data.seasonActive, group_stage: data.groupStage,
+        knockout: { ...ko, rounds: [...updatedRounds, nextRound] }, league_history: data.leagueHistory,
+      });
+      showToast('Round complete! Next round generated.');
+      setEditingScore(null);
+      return;
     }
-    update({ ...data, knockout: { ...ko, rounds: updatedRounds } });
-    setEditingScore(null);
-    showToast('Score saved!');
   }
 
-  const spotsOptions = [2,4,8,16].map(n => ({ value: String(n), label: `${n} teams` }));
+  await supabase.from('league_settings').upsert({
+    id: 1, season_number: data.seasonNumber, qualification_spots: data.qualificationSpots,
+    season_active: data.seasonActive, group_stage: data.groupStage,
+    knockout: { ...ko, rounds: updatedRounds }, league_history: data.leagueHistory,
+  });
+  setEditingScore(null);
+  showToast('Score saved!');
+}
 
+const spotsOptions = [2,4,8,16].map(n => ({ value: String(n), label: `${n} teams` }));
   return (
     <div className="space-y-4">
       <h2 className="font-bold text-white text-base sm:text-lg">Knockout / Playoffs</h2>
