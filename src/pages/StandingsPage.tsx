@@ -5,40 +5,48 @@ import { Trophy, Check } from 'lucide-react';
 
 interface Props { setPage: (p: string) => void; initialTab?: 'standings' | 'knockout'; }
 
-function TeamBox({ teamId, score, won, data }: { teamId?: string; score?: number; won?: boolean; data: any }) {
+function TeamSlot({ teamId, score, won, data }: { teamId?: string; score?: number; won?: boolean; data: any }) {
   const team = teamId ? data.teams.find((t: any) => t.id === teamId) : null;
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      gap: 8, padding: '7px 10px', borderRadius: 8, width: 150,
-      background: won ? 'rgba(232,184,75,0.15)' : 'rgba(255,255,255,0.05)',
-      border: `1px solid ${won ? 'rgba(232,184,75,0.4)' : 'rgba(255,255,255,0.1)'}`,
+      padding: '6px 10px', height: 36,
+      background: won ? 'rgba(232,184,75,0.12)' : team ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-        {team?.logo
-          ? <img src={team.logo} alt="" style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-          : <div style={{ width: 18, height: 18, borderRadius: 4, background: 'rgba(232,184,75,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#e8b84b', fontWeight: 700, flexShrink: 0 }}>
-              {team?.name?.[0] ?? '?'}
-            </div>
-        }
-        <span style={{ fontSize: 12, fontWeight: 600, color: won ? '#e8b84b' : 'rgba(255,255,255,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, flex: 1 }}>
+        {team ? (
+          team.logo
+            ? <img src={team.logo} alt="" style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+            : <div style={{ width: 18, height: 18, borderRadius: 4, background: won ? 'rgba(232,184,75,0.3)' : 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: won ? '#e8b84b' : 'rgba(255,255,255,0.5)', fontWeight: 800, flexShrink: 0 }}>
+                {team.name?.[0]}
+              </div>
+        ) : (
+          <div style={{ width: 18, height: 18, borderRadius: 4, background: 'rgba(255,255,255,0.04)', flexShrink: 0 }} />
+        )}
+        <span style={{ fontSize: 12, fontWeight: won ? 700 : 500, color: won ? '#e8b84b' : team ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {team?.name ?? 'TBD'}
         </span>
       </div>
-      {score !== undefined && (
-        <span style={{ fontSize: 13, fontWeight: 800, color: won ? '#e8b84b' : 'rgba(255,255,255,0.6)', flexShrink: 0 }}>{score}</span>
-      )}
+      <span style={{ fontSize: 13, fontWeight: 800, color: won ? '#e8b84b' : score !== undefined ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.15)', marginLeft: 8, flexShrink: 0, minWidth: 16, textAlign: 'right' }}>
+        {score !== undefined ? score : '–'}
+      </span>
     </div>
   );
 }
 
-function MatchNode({ match, data }: { match: any; data: any }) {
+function MatchCard({ match, data }: { match: any; data: any }) {
   const homeWon = match.played && match.winnerId === match.homeTeamId;
   const awayWon = match.played && match.winnerId === match.awayTeamId;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <TeamBox teamId={match.homeTeamId} score={match.played ? match.homeScore : undefined} won={homeWon} data={data} />
-      <TeamBox teamId={match.awayTeamId} score={match.played ? match.awayScore : undefined} won={awayWon} data={data} />
+    <div style={{
+      width: 180, borderRadius: 10, overflow: 'hidden',
+      border: `1px solid ${match.played ? 'rgba(232,184,75,0.2)' : 'rgba(255,255,255,0.1)'}`,
+      background: '#0d1520',
+      boxShadow: match.played ? '0 0 12px rgba(232,184,75,0.08)' : 'none',
+    }}>
+      <TeamSlot teamId={match.homeTeamId} score={match.played ? match.homeScore : undefined} won={homeWon} data={data} />
+      <TeamSlot teamId={match.awayTeamId} score={match.played ? match.awayScore : undefined} won={awayWon} data={data} />
     </div>
   );
 }
@@ -46,103 +54,155 @@ function MatchNode({ match, data }: { match: any; data: any }) {
 function BracketTree({ rounds, data }: { rounds: any[]; data: any }) {
   if (!rounds || rounds.length === 0) return null;
 
-  const MATCH_H = 72;
-  const MATCH_GAP = 20;
-  const ROUND_W = 170;
-  const ROUND_GAP = 60;
-  const totalRounds = rounds.length;
+  const CARD_H = 74;
+  const CARD_W = 180;
+  const V_GAP = 24;
+  const H_GAP = 56;
+  const LABEL_H = 28;
+  const CHAMPION_W = 160;
 
-  // Calculate vertical positions for each match in each round
-  function getMatchPositions(roundIdx: number): number[] {
-    const matchCount = rounds[roundIdx].matches.length;
+  // Build all rounds including future empty rounds
+  // Figure out max rounds needed based on first round match count
+  const firstRoundMatches = rounds[0].matches.length;
+  const totalRoundsNeeded = Math.ceil(Math.log2(firstRoundMatches * 2)) + (firstRoundMatches === 1 ? 0 : 0);
+
+  // Build full round list — pad with empty future rounds
+  const allRounds: any[] = [...rounds];
+  let prevCount = rounds[rounds.length - 1].matches.length;
+  while (prevCount > 1) {
+    const nextCount = Math.ceil(prevCount / 2);
+    allRounds.push({
+      id: `future_${allRounds.length}`,
+      name: getRoundName(prevCount * 2, allRounds.length),
+      matches: Array.from({ length: nextCount }, (_, i) => ({
+        id: `empty_${allRounds.length}_${i}`,
+        homeTeamId: undefined, awayTeamId: undefined,
+        played: false, empty: true,
+      })),
+    });
+    prevCount = nextCount;
+  }
+
+  const totalRounds = allRounds.length;
+
+  // Compute vertical positions for each match per round
+  function getPositions(roundIdx: number): number[] {
+    const count = allRounds[roundIdx].matches.length;
     if (roundIdx === 0) {
-      return rounds[roundIdx].matches.map((_: any, i: number) => i * (MATCH_H + MATCH_GAP));
+      return allRounds[0].matches.map((_: any, i: number) => LABEL_H + i * (CARD_H + V_GAP));
     }
-    const prevPositions = getMatchPositions(roundIdx - 1);
+    const prev = getPositions(roundIdx - 1);
     const positions: number[] = [];
-    for (let i = 0; i < matchCount; i++) {
-      const top = prevPositions[i * 2];
-      const bottom = prevPositions[i * 2 + 1] ?? top;
-      positions.push((top + bottom) / 2);
+    for (let i = 0; i < count; i++) {
+      const a = prev[i * 2] ?? prev[prev.length - 1];
+      const b = prev[i * 2 + 1] ?? a;
+      positions.push((a + b) / 2);
     }
     return positions;
   }
 
-  const allPositions = rounds.map((_, i) => getMatchPositions(i));
-  const totalHeight = Math.max(...allPositions[0].map((p: number) => p + MATCH_H)) + 40;
-  const totalWidth = totalRounds * (ROUND_W + ROUND_GAP) + (rounds[rounds.length - 1].matches.length === 1 ? ROUND_W + ROUND_GAP + 120 : 0);
+  const allPositions = allRounds.map((_, i) => getPositions(i));
+  const svgH = Math.max(...allPositions[0].map((p: number) => p + CARD_H)) + 40;
+  const svgW = totalRounds * (CARD_W + H_GAP) + CHAMPION_W + H_GAP;
 
-  // Champion box position
-  const lastRoundIdx = rounds.length - 1;
-  const lastPositions = allPositions[lastRoundIdx];
-  const championY = lastPositions[0] + MATCH_H / 2 - 18;
-  const championX = lastRoundIdx * (ROUND_W + ROUND_GAP) + ROUND_W + ROUND_GAP;
-  const champion = rounds[lastRoundIdx]?.matches[0]?.winnerId
-    ? data.teams.find((t: any) => t.id === rounds[lastRoundIdx].matches[0].winnerId)
-    : null;
+  // Find champion
+  const lastReal = rounds[rounds.length - 1];
+  const championId = lastReal?.matches[0]?.winnerId;
+  const champion = championId ? data.teams.find((t: any) => t.id === championId) : null;
+  const champX = totalRounds * (CARD_W + H_GAP);
+  const champY = allPositions[totalRounds - 1][0] + CARD_H / 2 - 20;
 
   return (
-    <div style={{ overflowX: 'auto', paddingBottom: 12 }}>
-      <div style={{ position: 'relative', width: totalWidth, height: totalHeight, minWidth: totalWidth }}>
-        {rounds.map((round, roundIdx) => {
-          const positions = allPositions[roundIdx];
-          const x = roundIdx * (ROUND_W + ROUND_GAP);
+    <div style={{ overflowX: 'auto', overflowY: 'visible', paddingBottom: 8 }}>
+      <div style={{ position: 'relative', width: svgW, height: svgH }}>
+
+        {/* SVG for connector lines */}
+        <svg style={{ position: 'absolute', left: 0, top: 0, width: svgW, height: svgH, pointerEvents: 'none', overflow: 'visible' }}>
+          {allRounds.map((round, rIdx) => {
+            if (rIdx >= totalRounds - 1) return null;
+            const positions = allPositions[rIdx];
+            const nextPositions = allPositions[rIdx + 1];
+            const x1 = rIdx * (CARD_W + H_GAP) + CARD_W;
+            const x2 = (rIdx + 1) * (CARD_W + H_GAP);
+            const midX = x1 + H_GAP / 2;
+
+            return positions.map((p: number, mIdx: number) => {
+              const myMid = p + LABEL_H / 2 + CARD_H / 2 - (rIdx === 0 ? 0 : LABEL_H / 2);
+              const actualMyMid = p + CARD_H / 2;
+              const nextIdx = Math.floor(mIdx / 2);
+              const nextMid = nextPositions[nextIdx] + CARD_H / 2;
+              const isTop = mIdx % 2 === 0;
+              const siblingIdx = isTop ? mIdx + 1 : mIdx - 1;
+              const siblingMid = siblingIdx < positions.length ? positions[siblingIdx] + CARD_H / 2 : actualMyMid;
+              const vertTop = Math.min(actualMyMid, siblingMid);
+              const vertBot = Math.max(actualMyMid, siblingMid);
+
+              return (
+                <g key={`${rIdx}-${mIdx}`}>
+                  {/* Horizontal from match to midpoint */}
+                  <line x1={x1} y1={actualMyMid} x2={midX} y2={actualMyMid}
+                    stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+                  {/* Vertical connector between siblings — only draw once (for top sibling) */}
+                  {isTop && (
+                    <line x1={midX} y1={vertTop} x2={midX} y2={vertBot}
+                      stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+                  )}
+                  {/* Horizontal to next round — only draw once (for top sibling) */}
+                  {isTop && (
+                    <line x1={midX} y1={nextMid} x2={x2} y2={nextMid}
+                      stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+                  )}
+                </g>
+              );
+            });
+          })}
+
+          {/* Line from final to champion */}
+          {champion && (() => {
+            const finalPos = allPositions[totalRounds - 1][0];
+            const finalMid = finalPos + CARD_H / 2;
+            const fx = (totalRounds - 1) * (CARD_W + H_GAP) + CARD_W;
+            return (
+              <line x1={fx} y1={finalMid} x2={champX} y2={finalMid}
+                stroke="rgba(232,184,75,0.4)" strokeWidth="1.5" strokeDasharray="4 3" />
+            );
+          })()}
+        </svg>
+
+        {/* Match cards */}
+        {allRounds.map((round, rIdx) => {
+          const positions = allPositions[rIdx];
+          const x = rIdx * (CARD_W + H_GAP);
+          const isReal = rIdx < rounds.length;
 
           return (
             <div key={round.id}>
               {/* Round label */}
-              <div style={{ position: 'absolute', left: x, top: 0, width: ROUND_W, textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.08em', paddingBottom: 8 }}>
+              <div style={{ position: 'absolute', left: x, top: 0, width: CARD_W, textAlign: 'center', fontSize: 10, fontWeight: 700, color: isReal ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                 {round.name}
               </div>
 
-              {round.matches.map((match: any, matchIdx: number) => {
-                const y = positions[matchIdx] + 24;
-
-                // Draw connector lines to next round
-                let lines = null;
-                if (roundIdx < rounds.length - 1) {
-                  const nextPositions = allPositions[roundIdx + 1];
-                  const nextMatchIdx = Math.floor(matchIdx / 2);
-                  const nextY = nextPositions[nextMatchIdx] + 24 + MATCH_H / 2;
-                  const myMidY = y + MATCH_H / 2;
-                  const lineX1 = x + ROUND_W;
-                  const lineX2 = x + ROUND_W + ROUND_GAP;
-                  const midX = lineX1 + ROUND_GAP / 2;
-
-                  lines = (
-                    <svg style={{ position: 'absolute', left: 0, top: 0, width: totalWidth, height: totalHeight, pointerEvents: 'none', overflow: 'visible' }}>
-                      {/* Horizontal line from match to mid */}
-                      <line x1={lineX1} y1={myMidY} x2={midX} y2={myMidY} stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
-                      {/* Vertical line connecting siblings */}
-                      {matchIdx % 2 === 0 && (
-                        <>
-                          <line x1={midX} y1={myMidY} x2={midX} y2={nextY} stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
-                          {/* Horizontal line to next match */}
-                          <line x1={midX} y1={nextY} x2={lineX2} y2={nextY} stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
-                        </>
-                      )}
-                    </svg>
-                  );
-                }
-
-                // Line from last round to champion
-                let championLine = null;
-                if (roundIdx === rounds.length - 1 && champion) {
-                  const myMidY = y + MATCH_H / 2;
-                  championLine = (
-                    <svg style={{ position: 'absolute', left: 0, top: 0, width: totalWidth, height: totalHeight, pointerEvents: 'none', overflow: 'visible' }}>
-                      <line x1={x + ROUND_W} y1={myMidY} x2={championX} y2={myMidY} stroke="rgba(232,184,75,0.4)" strokeWidth="1.5" />
-                    </svg>
-                  );
+              {round.matches.map((match: any, mIdx: number) => {
+                const y = positions[mIdx];
+                // For future empty rounds, show who advanced
+                let displayMatch = match;
+                if (match.empty && isReal === false && rIdx > 0) {
+                  // Try to figure out winner from previous round
+                  const prevRound = allRounds[rIdx - 1];
+                  if (prevRound && rIdx < rounds.length + 1) {
+                    const homeFromMatch = prevRound.matches[mIdx * 2];
+                    const awayFromMatch = prevRound.matches[mIdx * 2 + 1];
+                    displayMatch = {
+                      ...match,
+                      homeTeamId: homeFromMatch?.winnerId,
+                      awayTeamId: awayFromMatch?.winnerId,
+                    };
+                  }
                 }
 
                 return (
-                  <div key={match.id}>
-                    {lines}
-                    {championLine}
-                    <div style={{ position: 'absolute', left: x, top: y }}>
-                      <MatchNode match={match} data={data} />
-                    </div>
+                  <div key={match.id} style={{ position: 'absolute', left: x, top: y + LABEL_H }}>
+                    <MatchCard match={displayMatch} data={data} />
                   </div>
                 );
               })}
@@ -152,10 +212,31 @@ function BracketTree({ rounds, data }: { rounds: any[]; data: any }) {
 
         {/* Champion box */}
         {champion && (
-          <div style={{ position: 'absolute', left: championX, top: championY }}>
-            <div style={{ padding: '8px 14px', borderRadius: 10, background: 'linear-gradient(135deg,rgba(232,184,75,0.25),rgba(232,184,75,0.1))', border: '1.5px solid rgba(232,184,75,0.5)', textAlign: 'center' }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: '#e8b84b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>🏆 Champion</div>
+          <div style={{ position: 'absolute', left: champX + H_GAP / 2, top: champY }}>
+            <div style={{
+              padding: '10px 16px', borderRadius: 12, textAlign: 'center',
+              background: 'linear-gradient(135deg,rgba(232,184,75,0.2),rgba(232,184,75,0.08))',
+              border: '1.5px solid rgba(232,184,75,0.5)',
+              boxShadow: '0 0 20px rgba(232,184,75,0.15)',
+            }}>
+              <div style={{ fontSize: 16, marginBottom: 4 }}>🏆</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#e8b84b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Champion</div>
               <div style={{ fontSize: 13, fontWeight: 800, color: 'white' }}>{champion.name}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Pending champion box */}
+        {!champion && (
+          <div style={{ position: 'absolute', left: champX + H_GAP / 2, top: champY }}>
+            <div style={{
+              padding: '10px 16px', borderRadius: 12, textAlign: 'center',
+              background: 'rgba(255,255,255,0.02)',
+              border: '1.5px dashed rgba(255,255,255,0.1)',
+            }}>
+              <div style={{ fontSize: 16, marginBottom: 4, opacity: 0.3 }}>🏆</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Champion</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.15)' }}>TBD</div>
             </div>
           </div>
         )}
@@ -174,7 +255,6 @@ export function StandingsPage({ setPage, initialTab = 'standings' }: Props) {
   const allMatches = getAllMatchesFromMatchdays(data.matchdays);
   const standings = computeStandings(data.teams, allMatches);
   const ko = data.knockout;
-
   const posColors = ['text-[#e8b84b]', 'text-white/60', 'text-amber-700'];
 
   return (
@@ -190,11 +270,8 @@ export function StandingsPage({ setPage, initialTab = 'standings' }: Props) {
         {currentUser?.role === 'admin' && tab === 'standings' && (
           <div className="flex items-center gap-2">
             <span className="text-white/50 text-sm">Qualification spots:</span>
-            <select
-              value={qualSpots}
-              onChange={e => setQualSpots(Number(e.target.value))}
-              className="bg-white/10 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm"
-            >
+            <select value={qualSpots} onChange={e => setQualSpots(Number(e.target.value))}
+              className="bg-white/10 border border-white/10 text-white rounded-lg px-3 py-1.5 text-sm">
               {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
@@ -219,7 +296,7 @@ export function StandingsPage({ setPage, initialTab = 'standings' }: Props) {
       )}
 
       {tab === 'knockout' && (
-        <div className="bg-[#0f1923] border border-white/10 rounded-2xl p-6">
+        <div className="bg-[#0a1020] border border-white/10 rounded-2xl p-6">
           {(!ko?.rounds || ko.rounds.length === 0) ? (
             <div className="py-12 text-center text-white/30">
               <Trophy size={40} className="mx-auto mb-3 opacity-30" />
