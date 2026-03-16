@@ -1,3 +1,4 @@
+import { supabase } from '../supabase';
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context';
 import {
@@ -93,24 +94,22 @@ export function Navbar({ currentPage, setPage }: Props) {
 
   useEffect(() => { setMobileOpen(false); }, [currentPage]);
 
-  function markRead() {
-    const updated = {
-      ...data,
-      notifications: data.notifications.map(n =>
-        n.userId === currentUser?.id ? { ...n, read: true } : n
-      ),
-    };
-    update(updated);
-    setNotifOpen(v => !v);
-    setUserMenuOpen(false);
+  async function markRead() {
+  const unreadIds = myNotifs.filter(n => !n.read).map(n => n.id);
+  if (unreadIds.length > 0) {
+    await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
   }
+  setNotifOpen(v => !v);
+  setUserMenuOpen(false);
+}
 
-  function logout() {
-    setCurrentUser(null);
-    setPage('home');
-    setUserMenuOpen(false);
-    setMobileOpen(false);
-  }
+  async function logout() {
+  await supabase.auth.signOut();
+  setCurrentUser(null);
+  setPage('login');
+  setUserMenuOpen(false);
+  setMobileOpen(false);
+}
 
   function nav(p: string) {
     setPage(p);

@@ -148,17 +148,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [currentUser?.id]);
 
   const update = useCallback(async (newData: AppData) => {
-    setData(newData);
-    await supabase.from('league_settings').upsert({
-      id: 1,
-      season_number: newData.seasonNumber,
-      qualification_spots: newData.qualificationSpots,
-      season_active: newData.seasonActive,
-      group_stage: newData.groupStage,
-      knockout: newData.knockout,
-      league_history: newData.leagueHistory,
-    });
-  }, []);
+  await supabase.from('league_settings').upsert({
+    id: 1,
+    season_number: newData.seasonNumber,
+    qualification_spots: newData.qualificationSpots,
+    season_active: newData.seasonActive,
+    group_stage: newData.groupStage,
+    knockout: newData.knockout,
+    league_history: newData.leagueHistory,
+  });
+}, []);
 
   const setCurrentUser = useCallback((u: User | null) => {
     setCurrentUserState(u);
