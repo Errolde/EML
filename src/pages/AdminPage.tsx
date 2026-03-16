@@ -492,8 +492,7 @@ function AssignAdmin({ setPage }: { setPage: (p: string) => void }) {
       </div>
     </div>
   );
-
-
+}
 /* ==================== STATS ADMIN ==================== */
 function StatsAdmin({ setPage }: { setPage: (p: string) => void }) {
   const { data, update, showToast } = useApp();
