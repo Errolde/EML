@@ -78,7 +78,7 @@ export function PlayersPage({ setPage }: Props) {
                       </td>
                       <td className="px-4 py-3">
                         <button
-                          onClick={() => setPage(`player_${p.id}`)}
+                          onClick={() => setPage(`profile_${p.id}`)}
                           className="flex items-center gap-3 group"
                         >
                           <img src={getAvatarUrl(p.username, p.avatar)} alt={p.username} className="w-9 h-9 rounded-full object-cover" />
