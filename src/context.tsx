@@ -68,98 +68,104 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    console.log('Setting up realtime channel...');
+
     const channel = supabase
-      .channel('app-changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' },
-        payload => setData(prev => ({
-          ...prev, globalChat: [...prev.globalChat, mapChat(payload.new)]
-        })))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
-        payload => setData(prev => ({
-          ...prev, globalChat: prev.globalChat.map(m => m.id === payload.new.id ? mapChat(payload.new) : m)
-        })))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matchdays' },
-        payload => setData(prev => ({
-          ...prev, matchdays: prev.matchdays.map(m => m.id === payload.new.id ? mapMatchday(payload.new) : m)
-        })))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'matchdays' },
-        payload => setData(prev => ({
-          ...prev, matchdays: [...prev.matchdays, mapMatchday(payload.new)].sort((a, b) => a.number - b.number)
-        })))
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'matchdays' },
-        payload => setData(prev => ({
-          ...prev, matchdays: prev.matchdays.filter(m => m.id !== payload.old.id)
-        })))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'news_articles' },
-        payload => setData(prev => ({
-          ...prev, news: [mapNews(payload.new), ...prev.news]
-        })))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'news_articles' },
-        payload => setData(prev => ({
-          ...prev, news: prev.news.map(a => a.id === payload.new.id ? mapNews(payload.new) : a)
-        })))
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'news_articles' },
-        payload => setData(prev => ({
-          ...prev, news: prev.news.filter(a => a.id !== payload.old.id)
-        })))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'teams' },
-        payload => setData(prev => ({
-          ...prev, teams: [...prev.teams, { ...payload.new, playerIds: payload.new.player_ids ?? [], emlChampionships: payload.new.eml_championships ?? 0, createdAt: payload.new.created_at }]
-        })))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'teams' },
-        payload => setData(prev => ({
-          ...prev, teams: prev.teams.map(t => t.id === payload.new.id ? { ...payload.new, playerIds: payload.new.player_ids ?? [], emlChampionships: payload.new.eml_championships ?? 0, createdAt: payload.new.created_at } : t)
-        })))
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'teams' },
-        payload => setData(prev => ({
-          ...prev, teams: prev.teams.filter(t => t.id !== payload.old.id)
-        })))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' },
-        payload => setData(prev => ({
-          ...prev, users: prev.users.map(u => u.id === payload.new.id ? mapProfile(payload.new) : u)
-        })))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles' },
-        payload => setData(prev => ({
-          ...prev, users: [...prev.users, mapProfile(payload.new)]
-        })))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'awards' },
-        payload => setData(prev => ({
-          ...prev, awards: prev.awards.map(a => a.id === payload.new.id ? { ...payload.new, createdAt: payload.new.created_at, nominees: payload.new.nominees ?? [] } : a)
-        })))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'awards' },
-        payload => setData(prev => ({
-          ...prev, awards: [...prev.awards, { ...payload.new, createdAt: payload.new.created_at, nominees: payload.new.nominees ?? [] }]
-        })))
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'awards' },
-        payload => setData(prev => ({
-          ...prev, awards: prev.awards.filter(a => a.id !== payload.old.id)
-        })))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' },
+      .channel('app-changes-v2')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' },
         payload => {
-          if (payload.new.user_id === currentUser?.id) {
+          console.log('CHAT EVENT:', payload.eventType, payload);
+          if (payload.eventType === 'INSERT') {
             setData(prev => ({
-              ...prev, notifications: [mapNotification(payload.new), ...prev.notifications]
+              ...prev, globalChat: [...prev.globalChat, mapChat(payload.new)]
+            }));
+          } else if (payload.eventType === 'UPDATE') {
+            setData(prev => ({
+              ...prev, globalChat: prev.globalChat.map(m => m.id === payload.new.id ? mapChat(payload.new) : m)
             }));
           }
         })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchdays' },
+        payload => {
+          console.log('MATCHDAY EVENT:', payload.eventType);
+          if (payload.eventType === 'INSERT') {
+            setData(prev => ({ ...prev, matchdays: [...prev.matchdays, mapMatchday(payload.new)].sort((a, b) => a.number - b.number) }));
+          } else if (payload.eventType === 'UPDATE') {
+            setData(prev => ({ ...prev, matchdays: prev.matchdays.map(m => m.id === payload.new.id ? mapMatchday(payload.new) : m) }));
+          } else if (payload.eventType === 'DELETE') {
+            setData(prev => ({ ...prev, matchdays: prev.matchdays.filter(m => m.id !== payload.old.id) }));
+          }
+        })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'news_articles' },
+        payload => {
+          console.log('NEWS EVENT:', payload.eventType);
+          if (payload.eventType === 'INSERT') {
+            setData(prev => ({ ...prev, news: [mapNews(payload.new), ...prev.news] }));
+          } else if (payload.eventType === 'UPDATE') {
+            setData(prev => ({ ...prev, news: prev.news.map(a => a.id === payload.new.id ? mapNews(payload.new) : a) }));
+          } else if (payload.eventType === 'DELETE') {
+            setData(prev => ({ ...prev, news: prev.news.filter(a => a.id !== payload.old.id) }));
+          }
+        })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' },
+        payload => {
+          console.log('TEAM EVENT:', payload.eventType);
+          if (payload.eventType === 'INSERT') {
+            setData(prev => ({ ...prev, teams: [...prev.teams, { ...payload.new, playerIds: payload.new.player_ids ?? [], emlChampionships: payload.new.eml_championships ?? 0, createdAt: payload.new.created_at }] }));
+          } else if (payload.eventType === 'UPDATE') {
+            setData(prev => ({ ...prev, teams: prev.teams.map(t => t.id === payload.new.id ? { ...payload.new, playerIds: payload.new.player_ids ?? [], emlChampionships: payload.new.eml_championships ?? 0, createdAt: payload.new.created_at } : t) }));
+          } else if (payload.eventType === 'DELETE') {
+            setData(prev => ({ ...prev, teams: prev.teams.filter(t => t.id !== payload.old.id) }));
+          }
+        })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' },
+        payload => {
+          console.log('PROFILE EVENT:', payload.eventType);
+          if (payload.eventType === 'INSERT') {
+            setData(prev => ({ ...prev, users: [...prev.users, mapProfile(payload.new)] }));
+          } else if (payload.eventType === 'UPDATE') {
+            setData(prev => ({ ...prev, users: prev.users.map(u => u.id === payload.new.id ? mapProfile(payload.new) : u) }));
+          }
+        })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'awards' },
+        payload => {
+          console.log('AWARD EVENT:', payload.eventType);
+          if (payload.eventType === 'INSERT') {
+            setData(prev => ({ ...prev, awards: [...prev.awards, { ...payload.new, createdAt: payload.new.created_at, nominees: payload.new.nominees ?? [] }] }));
+          } else if (payload.eventType === 'UPDATE') {
+            setData(prev => ({ ...prev, awards: prev.awards.map(a => a.id === payload.new.id ? { ...payload.new, createdAt: payload.new.created_at, nominees: payload.new.nominees ?? [] } : a) }));
+          } else if (payload.eventType === 'DELETE') {
+            setData(prev => ({ ...prev, awards: prev.awards.filter(a => a.id !== payload.old.id) }));
+          }
+        })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' },
+        payload => {
+          console.log('NOTIFICATION EVENT:', payload);
+          if (payload.new.user_id === currentUser?.id) {
+            setData(prev => ({ ...prev, notifications: [mapNotification(payload.new), ...prev.notifications] }));
+          }
+        })
       .subscribe((status) => {
-  console.log('Realtime status:', status);
-});
+        console.log('Realtime status:', status);
+      });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      console.log('Removing realtime channel...');
+      supabase.removeChannel(channel);
+    };
   }, [currentUser?.id]);
 
   const update = useCallback(async (newData: AppData) => {
-  await supabase.from('league_settings').upsert({
-    id: 1,
-    season_number: newData.seasonNumber,
-    qualification_spots: newData.qualificationSpots,
-    season_active: newData.seasonActive,
-    group_stage: newData.groupStage,
-    knockout: newData.knockout,
-    league_history: newData.leagueHistory,
-  });
-}, []);
+    await supabase.from('league_settings').upsert({
+      id: 1,
+      season_number: newData.seasonNumber,
+      qualification_spots: newData.qualificationSpots,
+      season_active: newData.seasonActive,
+      group_stage: newData.groupStage,
+      knockout: newData.knockout,
+      league_history: newData.leagueHistory,
+    });
+  }, []);
 
   const setCurrentUser = useCallback((u: User | null) => {
     setCurrentUserState(u);
