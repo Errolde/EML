@@ -7,6 +7,54 @@ import { supabase } from '../supabase';
 
 interface Props { setPage: (p: string) => void; }
 
+// Reusable mention dropdown component
+function MentionDropdown({ query, users, onSelect }: {
+  query: string;
+  users: { id: string; username: string; avatar?: string }[];
+  onSelect: (username: string) => void;
+}) {
+  const filtered = users.filter(u => u.username.toLowerCase().startsWith(query.toLowerCase())).slice(0, 5);
+  if (!query || filtered.length === 0) return null;
+  return (
+    <div style={{
+      position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
+      background: '#0d1520', border: '1px solid rgba(255,255,255,0.12)',
+      borderRadius: 10, overflow: 'hidden', zIndex: 100,
+      boxShadow: '0 -8px 24px rgba(0,0,0,0.4)',
+    }}>
+      {filtered.map(u => (
+        <button key={u.id} onClick={() => onSelect(u.username)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer', transition: 'background 0.1s' }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(232,184,75,0.08)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+        >
+          <img src={getAvatarUrl(u.username, u.avatar)} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover' }} />
+          <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: 600 }}>{u.username}</span>
+          <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginLeft: 'auto' }}>@{u.username}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function useMention(message: string, setMessage: (v: string) => void, inputRef: React.RefObject<HTMLTextAreaElement>) {
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+
+  useEffect(() => {
+    const match = message.match(/@(\w*)$/);
+    setMentionQuery(match ? match[1] : null);
+  }, [message]);
+
+  function selectMention(username: string) {
+    const newMsg = message.replace(/@(\w*)$/, `@${username} `);
+    setMessage(newMsg);
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  }
+
+  return { mentionQuery, selectMention };
+}
+
 export function ChatPage({ setPage }: Props) {
   const { data, currentUser } = useApp();
   const [activeTab, setActiveTab] = useState<string>('global');
@@ -15,6 +63,8 @@ export function ChatPage({ setPage }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const { mentionQuery, selectMention } = useMention(message, setMessage, inputRef);
 
   const accessibleMatchChats: (MatchChat & { label: string; matchLabel: string })[] = [];
 
@@ -87,8 +137,11 @@ export function ChatPage({ setPage }: Props) {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-    if (e.key === 'Escape') setReplyTo(null);
+    if (e.key === 'Enter' && !e.shiftKey) {
+      if (mentionQuery !== null) { e.preventDefault(); return; }
+      e.preventDefault(); sendMessage();
+    }
+    if (e.key === 'Escape') { setReplyTo(null); }
   }
 
   function selectChannel(id: string) {
@@ -115,13 +168,7 @@ export function ChatPage({ setPage }: Props) {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
           <p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 8px', marginBottom: 4 }}>General</p>
-
-          <ChannelBtn
-            icon={<Globe size={14} />}
-            label="global-chat"
-            active={activeTab === 'global'}
-            onClick={() => selectChannel('global')}
-          />
+          <ChannelBtn icon={<Globe size={14} />} label="global-chat" active={activeTab === 'global'} onClick={() => selectChannel('global')} />
 
           {accessibleMatchChats.length > 0 && (
             <>
@@ -129,14 +176,7 @@ export function ChatPage({ setPage }: Props) {
                 {currentUser?.role === 'admin' ? 'All Match Chats' : 'Your Match Chats'}
               </p>
               {accessibleMatchChats.map(mc => (
-                <ChannelBtn
-                  key={mc.matchId}
-                  icon={mc.archived ? <Lock size={13} /> : <Hash size={13} />}
-                  label={mc.label}
-                  active={activeTab === mc.matchId}
-                  archived={mc.archived}
-                  onClick={() => selectChannel(mc.matchId)}
-                />
+                <ChannelBtn key={mc.matchId} icon={mc.archived ? <Lock size={13} /> : <Hash size={13} />} label={mc.label} active={activeTab === mc.matchId} archived={mc.archived} onClick={() => selectChannel(mc.matchId)} />
               ))}
             </>
           )}
@@ -148,12 +188,10 @@ export function ChatPage({ setPage }: Props) {
 
         {currentUser && (
           <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)', flexShrink: 0 }}>
-            <button
-              onClick={() => setPage(`profile_${currentUser.id}`)}
+            <button onClick={() => setPage(`profile_${currentUser.id}`)}
               style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', cursor: 'pointer', borderRadius: 10, padding: '6px 8px', transition: 'background 0.15s' }}
               onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)'}
-              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
-            >
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}>
               <img src={getAvatarUrl(currentUser.username, currentUser.avatar)} alt="" style={{ width: 32, height: 32, borderRadius: 10, objectFit: 'cover', border: '1.5px solid rgba(255,255,255,0.1)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                 <p style={{ color: 'white', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentUser.username}</p>
@@ -169,29 +207,21 @@ export function ChatPage({ setPage }: Props) {
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
       {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 20, backdropFilter: 'blur(4px)' }}
-        />
+        <div onClick={() => setSidebarOpen(false)}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 20, backdropFilter: 'blur(4px)' }} />
       )}
 
       <div style={{
-        width: 220,
-        background: '#070c16',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
-        display: 'flex',
-        flexDirection: 'column',
-        flexShrink: 0,
+        width: 220, background: '#070c16', borderRight: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex', flexDirection: 'column', flexShrink: 0,
         position: window.innerWidth < 768 ? 'absolute' : 'relative',
         top: 0, bottom: 0, left: 0,
         zIndex: window.innerWidth < 768 ? 30 : 'auto',
         transform: window.innerWidth < 768 ? (sidebarOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
         transition: 'transform 0.25s cubic-bezier(0.34,1.2,0.64,1)',
       } as React.CSSProperties}>
-        <button
-          onClick={() => setSidebarOpen(false)}
-          style={{ display: window.innerWidth < 768 ? 'flex' : 'none', position: 'absolute', top: 10, right: 10, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 8, padding: 6, cursor: 'pointer', color: 'rgba(255,255,255,0.5)', zIndex: 1, alignItems: 'center', justifyContent: 'center' }}
-        >
+        <button onClick={() => setSidebarOpen(false)}
+          style={{ display: window.innerWidth < 768 ? 'flex' : 'none', position: 'absolute', top: 10, right: 10, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 8, padding: 6, cursor: 'pointer', color: 'rgba(255,255,255,0.5)', zIndex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ChevronLeft size={15} />
         </button>
         <SidebarContent />
@@ -199,13 +229,10 @@ export function ChatPage({ setPage }: Props) {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b1320', minWidth: 0, overflow: 'hidden' }}>
         <div style={{ height: 52, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0, gap: 10 }}>
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="md:hidden"
+          <button onClick={() => setSidebarOpen(true)} className="md:hidden"
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', padding: 6, borderRadius: 8, display: 'flex', alignItems: 'center', flexShrink: 0 }}
             onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)'}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
-          >
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}>
             <MenuIcon size={16} />
           </button>
 
@@ -214,17 +241,12 @@ export function ChatPage({ setPage }: Props) {
               <>
                 <Globe size={16} style={{ color: '#e8b84b', flexShrink: 0 }} />
                 <span style={{ color: 'white', fontWeight: 700, fontSize: 14 }}>global-chat</span>
-                <span style={{ color: 'rgba(255,255,255,0.22)', fontSize: 11, display: 'none' }} className="sm:block">· EML community</span>
               </>
             ) : (
               <>
-                {isArchived
-                  ? <Lock size={16} style={{ color: 'rgba(255,255,255,0.3)', flexShrink: 0 }} />
-                  : <Hash size={16} style={{ color: '#e8b84b', flexShrink: 0 }} />}
+                {isArchived ? <Lock size={16} style={{ color: 'rgba(255,255,255,0.3)', flexShrink: 0 }} /> : <Hash size={16} style={{ color: '#e8b84b', flexShrink: 0 }} />}
                 <span style={{ color: 'white', fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeMatchChat?.matchLabel}</span>
-                {isArchived && (
-                  <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.35)', padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>Archived</span>
-                )}
+                {isArchived && <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.35)', padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>Archived</span>}
               </>
             )}
           </div>
@@ -251,22 +273,11 @@ export function ChatPage({ setPage }: Props) {
               const prevMsg = i > 0 ? messages[i - 1] : null;
               const showHeader = !prevMsg || prevMsg.authorId !== msg.authorId || (msg.createdAt - prevMsg.createdAt) > 5 * 60 * 1000;
               const replyAuthor = msg.replyTo ? data.users.find(u => u.id === msg.replyTo!.authorId) : null;
-
               return (
-                <MessageRow
-                  key={msg.id}
-                  msg={msg}
-                  author={author}
-                  isMe={isMe}
-                  showHeader={showHeader}
-                  replyAuthor={replyAuthor ?? undefined}
-                  isArchived={!!isArchived}
-                  onReply={() => {
-                    setReplyTo({ id: msg.id, authorId: msg.authorId, content: msg.content });
-                    inputRef.current?.focus();
-                  }}
-                  onAvatarClick={() => author && setPage(`profile_${author.id}`)}
-                />
+                <MessageRow key={msg.id} msg={msg} author={author} isMe={isMe} showHeader={showHeader}
+                  replyAuthor={replyAuthor ?? undefined} isArchived={!!isArchived}
+                  onReply={() => { setReplyTo({ id: msg.id, authorId: msg.authorId, content: msg.content }); inputRef.current?.focus(); }}
+                  onAvatarClick={() => author && setPage(`profile_${author.id}`)} />
               );
             })
           )}
@@ -278,11 +289,7 @@ export function ChatPage({ setPage }: Props) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px 12px 0 0', padding: '8px 12px', borderBottom: 'none' }}>
               <CornerUpLeft size={12} style={{ color: '#e8b84b', flexShrink: 0 }} />
               <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                Replying to{' '}
-                <span style={{ color: '#e8b84b', fontWeight: 600 }}>
-                  {data.users.find(u => u.id === replyTo.authorId)?.username}
-                </span>
-                : {replyTo.content.slice(0, 50)}{replyTo.content.length > 50 ? '...' : ''}
+                Replying to <span style={{ color: '#e8b84b', fontWeight: 600 }}>{data.users.find(u => u.id === replyTo.authorId)?.username}</span>: {replyTo.content.slice(0, 50)}{replyTo.content.length > 50 ? '...' : ''}
               </p>
               <button onClick={() => setReplyTo(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', padding: 2, display: 'flex' }}>
                 <X size={13} />
@@ -296,72 +303,53 @@ export function ChatPage({ setPage }: Props) {
               <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>This chat has been archived</span>
             </div>
           ) : (
-            <div style={{
-              display: 'flex',
-              alignItems: 'flex-end',
-              gap: 10,
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.09)',
-              borderRadius: replyTo ? '0 0 12px 12px' : 12,
-              padding: '10px 12px',
-              borderTop: replyTo ? '1px solid rgba(255,255,255,0.05)' : undefined,
-            }}>
-              <img
-                src={getAvatarUrl(currentUser?.username ?? 'U', currentUser?.avatar)}
-                alt=""
-                style={{ width: 30, height: 30, borderRadius: 8, objectFit: 'cover', flexShrink: 0, marginBottom: 2 }}
+            <div style={{ position: 'relative' }}>
+              {/* Mention dropdown */}
+              <MentionDropdown
+                query={mentionQuery ?? ''}
+                users={data.users}
+                onSelect={selectMention}
               />
-              <textarea
-                ref={inputRef}
-                value={message}
-                onChange={e => setMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={activeTab === 'global' ? 'Message #global-chat' : `Message match chat`}
-                rows={1}
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  color: 'rgba(255,255,255,0.9)',
-                  fontSize: 14,
-                  resize: 'none',
-                  minHeight: 24,
-                  maxHeight: 120,
-                  overflowY: 'auto',
-                  lineHeight: '1.5',
-                  paddingTop: 3,
-                  fontFamily: 'inherit',
-                }}
-                onInput={e => {
-                  const el = e.target as HTMLTextAreaElement;
-                  el.style.height = 'auto';
-                  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-                }}
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!message.trim()}
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 10,
-                  border: 'none',
-                  cursor: message.trim() ? 'pointer' : 'default',
-                  background: message.trim()
-                    ? 'linear-gradient(135deg,#e8b84b,#c99a2e)'
-                    : 'rgba(255,255,255,0.06)',
-                  color: message.trim() ? '#060a12' : 'rgba(255,255,255,0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  transition: 'all 0.2s ease',
-                  boxShadow: message.trim() ? '0 4px 12px rgba(232,184,75,0.35)' : 'none',
-                }}
-              >
-                <Send size={15} />
-              </button>
+              <div style={{
+                display: 'flex', alignItems: 'flex-end', gap: 10,
+                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)',
+                borderRadius: replyTo ? '0 0 12px 12px' : 12, padding: '10px 12px',
+                borderTop: replyTo ? '1px solid rgba(255,255,255,0.05)' : undefined,
+              }}>
+                <img src={getAvatarUrl(currentUser?.username ?? 'U', currentUser?.avatar)} alt=""
+                  style={{ width: 30, height: 30, borderRadius: 8, objectFit: 'cover', flexShrink: 0, marginBottom: 2 }} />
+                <textarea
+                  ref={inputRef}
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={activeTab === 'global' ? 'Message #global-chat · type @ to mention' : 'Message match chat · type @ to mention'}
+                  rows={1}
+                  style={{
+                    flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                    color: 'rgba(255,255,255,0.9)', fontSize: 14, resize: 'none',
+                    minHeight: 24, maxHeight: 120, overflowY: 'auto', lineHeight: '1.5',
+                    paddingTop: 3, fontFamily: 'inherit',
+                  }}
+                  onInput={e => {
+                    const el = e.target as HTMLTextAreaElement;
+                    el.style.height = 'auto';
+                    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+                  }}
+                />
+                <button onClick={sendMessage} disabled={!message.trim()}
+                  style={{
+                    width: 34, height: 34, borderRadius: 10, border: 'none',
+                    cursor: message.trim() ? 'pointer' : 'default',
+                    background: message.trim() ? 'linear-gradient(135deg,#e8b84b,#c99a2e)' : 'rgba(255,255,255,0.06)',
+                    color: message.trim() ? '#060a12' : 'rgba(255,255,255,0.2)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0, transition: 'all 0.2s ease',
+                    boxShadow: message.trim() ? '0 4px 12px rgba(232,184,75,0.35)' : 'none',
+                  }}>
+                  <Send size={15} />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -375,24 +363,12 @@ function ChannelBtn({ icon, label, active, archived, onClick }: {
 }) {
   const [hovered, setHovered] = useState(false);
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+    <button onClick={onClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        width: '100%',
-        padding: '7px 10px',
-        borderRadius: 8,
-        background: active ? 'rgba(255,255,255,0.1)' : hovered ? 'rgba(255,255,255,0.05)' : 'transparent',
-        border: 'none',
-        cursor: 'pointer',
-        transition: 'background 0.12s',
-        marginBottom: 1,
-      }}
-    >
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 10px',
+        borderRadius: 8, background: active ? 'rgba(255,255,255,0.1)' : hovered ? 'rgba(255,255,255,0.05)' : 'transparent',
+        border: 'none', cursor: 'pointer', transition: 'background 0.12s', marginBottom: 1,
+      }}>
       <span style={{ color: active ? '#e8b84b' : archived ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.3)', flexShrink: 0 }}>{icon}</span>
       <span style={{ color: active ? 'white' : 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: active ? 600 : 400, flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
       {archived && <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.05)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>archived</span>}
@@ -411,33 +387,21 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
   onAvatarClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-
   return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
       style={{
-        display: 'flex',
-        gap: 10,
-        padding: '3px 8px',
-        borderRadius: 10,
+        display: 'flex', gap: 10, padding: '3px 8px', borderRadius: 10,
         background: hovered ? 'rgba(255,255,255,0.025)' : 'transparent',
-        transition: 'background 0.1s',
-        marginTop: showHeader ? 14 : 0,
-        alignItems: 'flex-start',
-        position: 'relative',
-      }}
-    >
+        transition: 'background 0.1s', marginTop: showHeader ? 14 : 0,
+        alignItems: 'flex-start', position: 'relative',
+      }}>
       <div style={{ width: 36, flexShrink: 0, display: 'flex', justifyContent: 'center', paddingTop: 2 }}>
         {showHeader ? (
           <button onClick={onAvatarClick} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-            <img
-              src={getAvatarUrl(author?.username ?? 'U', author?.avatar)}
-              alt=""
+            <img src={getAvatarUrl(author?.username ?? 'U', author?.avatar)} alt=""
               style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'cover', border: '1.5px solid rgba(255,255,255,0.08)', transition: 'border-color 0.15s' }}
               onMouseEnter={e => (e.target as HTMLElement).style.borderColor = 'rgba(232,184,75,0.4)'}
-              onMouseLeave={e => (e.target as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'}
-            />
+              onMouseLeave={e => (e.target as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'} />
           </button>
         ) : (
           <span style={{ fontSize: 9, color: hovered ? 'rgba(255,255,255,0.22)' : 'transparent', transition: 'color 0.1s', lineHeight: '36px', userSelect: 'none', whiteSpace: 'nowrap' }}>
@@ -449,12 +413,10 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
       <div style={{ flex: 1, minWidth: 0 }}>
         {showHeader && (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
-            <button
-              onClick={onAvatarClick}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600, fontSize: 14, color: isMe ? '#e8b84b' : 'rgba(255,255,255,0.9)', textDecoration: 'none' }}
+            <button onClick={onAvatarClick}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600, fontSize: 14, color: isMe ? '#e8b84b' : 'rgba(255,255,255,0.9)' }}
               onMouseEnter={e => (e.currentTarget as HTMLElement).style.textDecoration = 'underline'}
-              onMouseLeave={e => (e.currentTarget as HTMLElement).style.textDecoration = 'none'}
-            >
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.textDecoration = 'none'}>
               {author?.username ?? 'Unknown'}
             </button>
             {author?.role === 'admin' && (
@@ -478,27 +440,14 @@ function MessageRow({ msg, author, isMe, showHeader, replyAuthor, isArchived, on
       </div>
 
       {!isArchived && hovered && (
-        <button
-          onClick={onReply}
+        <button onClick={onReply}
           style={{
-            position: 'absolute',
-            top: 4,
-            right: 8,
-            background: 'rgba(14,20,35,0.95)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 8,
-            padding: '4px 8px',
-            cursor: 'pointer',
-            color: 'rgba(255,255,255,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            transition: 'all 0.15s',
+            position: 'absolute', top: 4, right: 8, background: 'rgba(14,20,35,0.95)',
+            border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '4px 8px',
+            cursor: 'pointer', color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11,
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(232,184,75,0.12)'; (e.currentTarget as HTMLElement).style.color = '#e8b84b'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(232,184,75,0.25)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(14,20,35,0.95)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.1)'; }}
-        >
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(14,20,35,0.95)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.1)'; }}>
           <CornerUpLeft size={11} /> Reply
         </button>
       )}
